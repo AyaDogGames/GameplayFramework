@@ -52,13 +52,14 @@ public:
 
 protected:
 
-	// TODO: Replace with Data Asset and load with asset manager
+	// Messages will be broadcast from datatable if they match the message parent tag, can use either MessageWidgetDataTable or MessageDataAsset
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="UI Data")
 	TObjectPtr<UDataTable> MessageWidgetDataTable;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="UI Data")
 	FGameplayTag MessageParentTag;
 
+	// Messages will be broadcast from data asset if they match the message parent tag, can use either MessageWidgetDataTable or MessageDataAsset
 	UPROPERTY(EditDefaultsOnly, Category="UI Data")
 	TObjectPtr<UDaWidgetMessageData> MessageDataAsset;
 	
