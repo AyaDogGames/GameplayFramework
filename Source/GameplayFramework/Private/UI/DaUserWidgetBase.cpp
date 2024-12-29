@@ -6,5 +6,11 @@
 void UDaUserWidgetBase::SetWidgetController(UObject* InWidgetController)
 {
 	WidgetController = InWidgetController;
+	NativeWidgetControllerSet();
+	
+}
+
+void UDaUserWidgetBase::NativeWidgetControllerSet()
+{
 	WidgetControllerSet();
 }

@@ -23,8 +23,12 @@ public:
 	TObjectPtr<UObject> WidgetController;
 
 protected:
-	
+
+	// Called when controller data is ready to be used in blueprint
 	UFUNCTION(BlueprintImplementableEvent)
 	void WidgetControllerSet();
+
+	// subclasses should call super at end of overrided method. Base Impl Will call WidgetControllerSet Blueprint event.
+	virtual void NativeWidgetControllerSet();
 	
 };
