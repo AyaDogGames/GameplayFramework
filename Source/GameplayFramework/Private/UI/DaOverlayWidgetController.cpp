@@ -31,14 +31,6 @@ void UDaOverlayWidgetController::BindCallbacksToDependencies()
 							MessageWidgetDataDelegate.Broadcast(Data);
 						}
 					}
-
-					if (MessageWidgetDataTable)
-					{
-						if (const FUIWidgetRow* Row = GetDataTableRowByTag<FUIWidgetRow>(MessageWidgetDataTable, Tag))
-						{
-							MessageWidgetRowDelegate.Broadcast(*Row);
-						}
-					}
 				}
 			}
 	});
