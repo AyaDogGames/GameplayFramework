@@ -12,7 +12,8 @@ void UDaInventoryWidgetController::InitializeInventory(AActor* Actor)
 	InventoryComponent = UDaInventoryComponent::GetInventoryFromActor(Actor);
 	if (!InventoryComponent)
 	{
-		LOG_WARNING("UDaInventoryWidgetController::InitializeInventory: InventoryComponent is null, Actor: %s", *GetNameSafe(Actor));	
+		LOG_WARNING("UDaInventoryWidgetController::InitializeInventory: InventoryComponent is null, Actor: %s", *GetNameSafe(Actor));
+		return;
 	}
 	
 	// Subscribe to inventory change notifications

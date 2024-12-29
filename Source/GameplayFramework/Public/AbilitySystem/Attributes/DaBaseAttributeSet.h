@@ -61,6 +61,8 @@ public:
 
  FORCEINLINE FGameplayTag GetSetIdentifierTag() const { return SetIdentifierTag; }
 
+ FGameplayTagContainer GetAttributeTags() const;
+ 
  // maps gameplay tags to static attribute getter functions for convenience
  TMap<FGameplayTag, TStaticFuncPtr<FGameplayAttribute()>> TagsToAttributes;
  

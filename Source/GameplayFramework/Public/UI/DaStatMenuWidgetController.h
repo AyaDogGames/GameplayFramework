@@ -17,5 +17,17 @@ UCLASS(BlueprintType, Blueprintable)
 class GAMEPLAYFRAMEWORK_API UDaStatMenuWidgetController : public UDaWidgetController
 {
 	GENERATED_BODY()
+
+public:
+
+	UFUNCTION(BlueprintCallable, Category = "StatMenuController|GameplayTags")
+	FGameplayTagContainer GetPrimaryAttributeTags();
+
+	UFUNCTION(BlueprintCallable, Category = "StatMenuController|GameplayTags")
+	FGameplayTagContainer GetSecondaryAttributeTags();
+
+private:
+
+	FGameplayTagContainer GetAttributeTags(const FGameplayTag& ParentTag) const;
 	
 };

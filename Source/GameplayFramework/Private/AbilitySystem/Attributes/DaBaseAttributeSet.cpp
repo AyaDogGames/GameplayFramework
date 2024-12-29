@@ -23,3 +23,15 @@ UDaAbilitySystemComponent* UDaBaseAttributeSet::GetDaAbilitySystemComponent() co
 {
 	return Cast<UDaAbilitySystemComponent>(GetOwningAbilitySystemComponent());
 }
+
+FGameplayTagContainer UDaBaseAttributeSet::GetAttributeTags() const
+{
+	TArray<FGameplayTag> Tags;
+	
+	if (TagsToAttributes.GetKeys(Tags) > 0)
+	{
+		return FGameplayTagContainer::CreateFromArray(Tags);
+	}
+
+	return FGameplayTagContainer();
+}
