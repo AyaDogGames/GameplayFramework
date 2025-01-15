@@ -33,6 +33,9 @@ class GAMEPLAYFRAMEWORK_API ADaPlayerController : public APlayerController
 
 public:
 	ADaPlayerController();
+
+	UFUNCTION(BlueprintCallable)
+	void ToggleIMC(bool bUI);
 	
 	UFUNCTION(BlueprintCallable)
 	void TogglePauseMenu();
@@ -51,7 +54,13 @@ protected:
 	void AnyKeyInput(FKey PressedKey);
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Input, meta=(AllowPrivateAccess = "true"))
-	TObjectPtr<UInputMappingContext> InputMappingContext;
+	bool bLoadGameUIMappingContextByDefault;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Input, meta=(AllowPrivateAccess = "true"))
+	TObjectPtr<UInputMappingContext> GameUIInputMappingContext;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Input, meta=(AllowPrivateAccess = "true"))
+	TObjectPtr<UInputMappingContext> GameplayInputMappingContext;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta=(AllowPrivateAccess = "true"))
 	TObjectPtr<UDaInputConfig> InputConfig;
