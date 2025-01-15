@@ -22,19 +22,35 @@ ADaPlayerController::ADaPlayerController()
 {
 	bReplicates = true;
 	InputType = EGameplayInputType::GameOnly;
+	bLoadGameUIMappingContextByDefault = false;
 }
 
-void ADaPlayerController::BeginPlay()
+void ADaPlayerController::ToggleIMC(bool bUI)
 {
-	Super::BeginPlay();
-	check(InputMappingContext);
-	
 	UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
 	if (Subsystem)
 	{
 		Subsystem->ClearAllMappings();
-		Subsystem->AddMappingContext(InputMappingContext, 0);
+		if (bUI) 
+		{
+			checkf(GameUIInputMappingContext, TEXT("No Game UI IMC Set on player controller"));
+			Subsystem->AddMappingContext(GameUIInputMappingContext, 0);
+		}
+		else
+		{
+			checkf(GameplayInputMappingContext, TEXT("No Gameplay IMC Set on player controller"));
+			Subsystem->AddMappingContext(GameplayInputMappingContext, 0);
+		}
 	}
+}
+
+
+void ADaPlayerController::BeginPlay()
+{
+	Super::BeginPlay();
+	check(GameplayInputMappingContext);
+	
+	ToggleIMC(bLoadGameUIMappingContextByDefault);
 }
 
 void ADaPlayerController::SetupInputComponent()

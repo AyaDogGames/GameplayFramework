@@ -25,7 +25,7 @@ public class GameplayFramework : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"Core", "CoreUObject", "Engine", "InputCore", "GameplayAbilities", "EnhancedInput", "GameplayTasks", "DeveloperSettings", "GameplayTags", "AIModule"
+				"Core", "CoreUObject", "Engine", "InputCore", "GameplayAbilities", "EnhancedInput", "GameplayTasks", "DeveloperSettings", "GameplayTags", "AIModule", "CommonUI",
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
