@@ -9,6 +9,7 @@
 #include "UI/DaOverlayWidgetController.h"
 #include "UI/DaStatMenuWidgetController.h"
 #include "UI/DaUserWidgetBase.h"
+#include "UI/DaPrimaryGameLayout.h"
 
 UDaOverlayWidgetController* ADaHUD::GetOverlayWidgetController(const FWidgetControllerParams& WCParams)
 {
@@ -43,6 +44,16 @@ UDaInventoryWidgetController* ADaHUD::GetInventoryWidgetController(const FWidget
 	return InventoryWidgetController;
 }
 
+void ADaHUD::InitRootLayout(APlayerController* PC, APlayerState* PS, UDaAbilitySystemComponent* ASC)
+{
+	checkf(RootLayoutClass, TEXT("RootLayoutClass uninitialized, fill out in HUD blueprint class defaults."));
+
+	UUserWidget* Widget = CreateWidget<UUserWidget>(PC, RootLayoutClass);
+	RootLayout = Cast<UDaPrimaryGameLayout>(Widget);
+	
+	Widget->AddToViewport();
+}
+
 void ADaHUD::InitOverlay(APlayerController* PC, APlayerState* PS, UDaAbilitySystemComponent* ASC)
 {
 	checkf(OverlayWidgetClass, TEXT("OverlayWidgetClass uninitialized, fill out in HUD blueprint class defaults."));
@@ -63,6 +74,12 @@ void ADaHUD::InitOverlay(APlayerController* PC, APlayerState* PS, UDaAbilitySyst
 
 void ADaHUD::RemoveOverlay()
 {
+	if (RootLayout)
+	{
+		RootLayout->RemoveFromParent();
+		RootLayout->Destruct();
+	}
+	
 	if (OverlayWidget)
 	{
 		OverlayWidget->RemoveFromParent();

@@ -64,6 +64,13 @@ namespace CoreGameplayTags
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Message_StatusUpdate, "Message.StatusUpdate", "Base Status Update Message Type");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Message_Notification, "Message.Notification", "Base Notification Message Type");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Message_Warning, "Message.Warning", "Base Warning Message Type");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_UI, "UI", "Parent UI Group Tag");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_UI_Layer, "UI.Layer", "Parent UI.Layer Group Tag");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_UI_Layer_Game, "UI.Layer.Game", "Game HUD UI Layer");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_UI_Layer_GameMenu, "UI.Layer.GameMenu", "In game menu UI Layer");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_UI_Layer_Menu, "UI.Layer.Menu", "Main menu UI Layer");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_UI_Layer_Modal, "UI.Layer.Modal", "Modal UI Layer");
 	
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Status, "Status", "Base Status Tag");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Status_Death, "Status.Death", "Target has the death status.");

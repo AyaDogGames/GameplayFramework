@@ -7,6 +7,7 @@
 #include "GameFramework/HUD.h"
 #include "DaHUD.generated.h"
 
+class UDaPrimaryGameLayout;
 class UDaInventoryUIWidget;
 class UDaInventoryWidgetController;
 class UDaAbilitySystemComponent;
@@ -25,10 +26,13 @@ class GAMEPLAYFRAMEWORK_API ADaHUD : public AHUD
 
 public:
 
+	UDaPrimaryGameLayout* GetRootLayout() {return RootLayout;}
+	
 	UDaOverlayWidgetController* GetOverlayWidgetController(const FWidgetControllerParams& WCParams);
 	UDaStatMenuWidgetController* GetStatMenuWidgetController(const FWidgetControllerParams& WCParams);
 	UDaInventoryWidgetController* GetInventoryWidgetController(const FWidgetControllerParams& WCParams);
 
+	void InitRootLayout(APlayerController* PC, APlayerState* PS, UDaAbilitySystemComponent* ASC);
 	void InitOverlay(APlayerController* PC, APlayerState* PS, UDaAbilitySystemComponent* ASC);
 	void RemoveOverlay();
 
@@ -38,6 +42,9 @@ public:
 
 protected:
 
+	UPROPERTY(EditAnywhere, Category=UI)
+	TSubclassOf<UDaPrimaryGameLayout> RootLayoutClass;
+	
 	UPROPERTY(EditAnywhere, Category=UI)
 	TSubclassOf<UDaUserWidgetBase> OverlayWidgetClass;
 	
@@ -60,6 +67,9 @@ protected:
 	FGameplayTagContainer InventoryWidgetAttributeSetTags;
 	
 private:
+
+	UPROPERTY()
+	TObjectPtr<UDaPrimaryGameLayout> RootLayout;
 
 	UPROPERTY()
 	TObjectPtr<UDaUserWidgetBase> OverlayWidget;

@@ -64,7 +64,7 @@ void ADaCharacter::InitPlayerHUD() const
 		if (ADaHUD* HUD = Cast<ADaHUD>(PlayerController->GetHUD()))
 		{
 			HUD->RemoveOverlay();
-			HUD->InitOverlay(PlayerController, PS, AbilitySystemComponent);
+			HUD->InitRootLayout(PlayerController, PS, AbilitySystemComponent);
 		}
 	}
 }
