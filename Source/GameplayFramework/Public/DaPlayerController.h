@@ -53,6 +53,8 @@ protected:
 	virtual void SetupInputComponent() override;
 	void AnyKeyInput(FKey PressedKey);
 
+	void SetCurrentInputMode(EGameplayInputType Type);
+	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Input, meta=(AllowPrivateAccess = "true"))
 	bool bLoadGameUIMappingContextByDefault;
 	
@@ -73,10 +75,10 @@ protected:
 	TObjectPtr<UDaAbilitySystemComponent> AbilitySystemComponent;
 	UDaAbilitySystemComponent* GetAbilitySystemComponent();
 
-	UPROPERTY(EditAnywhere, Category="UI Setup")
+	UPROPERTY(EditAnywhere, Category=Input)
 	TEnumAsByte<EGameplayInputType> InputType;
 	
-	UPROPERTY(EditDefaultsOnly, Category="UI Setup")
+	UPROPERTY(EditDefaultsOnly, Category=Input)
 	TSubclassOf<UUserWidget> PauseMenuClass;
 
 	UPROPERTY()

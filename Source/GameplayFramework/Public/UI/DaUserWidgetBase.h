@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DaActivatableWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "DaUserWidgetBase.generated.h"
 
@@ -10,7 +11,7 @@
  * 
  */
 UCLASS()
-class GAMEPLAYFRAMEWORK_API UDaUserWidgetBase : public UUserWidget
+class GAMEPLAYFRAMEWORK_API UDaUserWidgetBase : public UDaActivatableWidget
 {
 	GENERATED_BODY()
 

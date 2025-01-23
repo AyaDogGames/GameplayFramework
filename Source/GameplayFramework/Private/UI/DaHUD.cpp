@@ -52,6 +52,8 @@ void ADaHUD::InitRootLayout(APlayerController* PC, APlayerState* PS, UDaAbilityS
 	RootLayout = Cast<UDaPrimaryGameLayout>(Widget);
 	
 	Widget->AddToViewport();
+
+	OnPrimaryGameLayoutLoaded.Broadcast();
 }
 
 void ADaHUD::InitOverlay(APlayerController* PC, APlayerState* PS, UDaAbilitySystemComponent* ASC)

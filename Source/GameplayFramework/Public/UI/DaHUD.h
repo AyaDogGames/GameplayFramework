@@ -16,6 +16,8 @@ class UDaOverlayWidgetController;
 class UDaUserWidgetBase;
 struct FWidgetControllerParams;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnOnPrimaryGameLayoutLoaded);
+
 /**
  * 
  */
@@ -65,6 +67,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category=UI)
 	FGameplayTagContainer InventoryWidgetAttributeSetTags;
+
+	UPROPERTY(BlueprintAssignable, Category="Events")
+	FOnOnPrimaryGameLayoutLoaded OnPrimaryGameLayoutLoaded;
 	
 private:
 

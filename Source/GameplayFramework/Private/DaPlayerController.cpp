@@ -31,15 +31,15 @@ void ADaPlayerController::ToggleIMC(bool bUI)
 	if (Subsystem)
 	{
 		Subsystem->ClearAllMappings();
-		if (bUI) 
+		if (GameUIInputMappingContext && bUI) 
 		{
 			checkf(GameUIInputMappingContext, TEXT("No Game UI IMC Set on player controller"));
 			Subsystem->AddMappingContext(GameUIInputMappingContext, 0);
 		}
-		else
+		if (GameplayInputMappingContext)
 		{
 			checkf(GameplayInputMappingContext, TEXT("No Gameplay IMC Set on player controller"));
-			Subsystem->AddMappingContext(GameplayInputMappingContext, 0);
+			Subsystem->AddMappingContext(GameplayInputMappingContext, 1);
 		}
 	}
 }
@@ -51,6 +51,7 @@ void ADaPlayerController::BeginPlay()
 	check(GameplayInputMappingContext);
 	
 	ToggleIMC(bLoadGameUIMappingContextByDefault);
+	SetCurrentInputMode(InputType);
 }
 
 void ADaPlayerController::SetupInputComponent()
@@ -66,6 +67,24 @@ void ADaPlayerController::SetupInputComponent()
 void ADaPlayerController::AnyKeyInput(FKey PressedKey)
 {
 	bIsUsingGamepad = PressedKey.IsGamepadKey();
+}
+
+void ADaPlayerController::SetCurrentInputMode(EGameplayInputType Type)
+{
+	if (Type == EGameplayInputType::GameOnly)
+	{
+		bShowMouseCursor = false;
+		SetInputMode(FInputModeGameOnly());
+	}
+	else if (Type == EGameplayInputType::GameAndCursor)
+	{
+		bShowMouseCursor = true;
+		SetInputMode(FInputModeGameAndUI());
+	} else
+	{
+		bShowMouseCursor = true;
+		SetInputMode(FInputModeUIOnly());
+	}
 }
 
 void ADaPlayerController::AbilityInputTagPressed(const FInputActionValue& Value, FGameplayTag InputTag)
@@ -124,20 +143,7 @@ void ADaPlayerController::TogglePauseMenu()
 		PauseMenuInstance->RemoveFromParent();
 		PauseMenuInstance = nullptr;
 
-		if (InputType == EGameplayInputType::GameOnly)
-		{
-			bShowMouseCursor = false;
-			SetInputMode(FInputModeGameOnly());
-		}
-		else if (InputType == EGameplayInputType::GameAndCursor)
-		{
-			bShowMouseCursor = true;
-			SetInputMode(FInputModeGameAndUI());
-		} else
-		{
-			bShowMouseCursor = true;
-			SetInputMode(FInputModeUIOnly());
-		}
+		SetCurrentInputMode(InputType);
 		
 		//@TODO: Single-player only. Make work for multiplayer.
 		// Example issues to resolve: triggering abilities while the game is paused, or releasing your sprint button after pausing the game 
@@ -153,8 +159,8 @@ void ADaPlayerController::TogglePauseMenu()
 	if (PauseMenuInstance)
 	{
 		PauseMenuInstance->AddToViewport(100);
-		bShowMouseCursor = true;
-		SetInputMode(FInputModeUIOnly());
+
+		SetCurrentInputMode(EGameplayInputType::CursorOnly);
 
 		//@TODO: Single-player only. Make work for multiplayer
 		if (GetWorld()->IsNetMode(NM_Standalone))
