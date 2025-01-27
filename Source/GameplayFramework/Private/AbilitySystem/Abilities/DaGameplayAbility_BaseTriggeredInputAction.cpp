@@ -38,7 +38,7 @@ void UDaGameplayAbility_BaseTriggeredInputAction::ActivateAbility(const FGamepla
 			{
 				for (const auto& It : InputConfig->AbilityInputActions)
 				{
-					if (It.InputAction && It.InputTag == StartupActivationTag)
+					if (It.InputAction && StartupActivationTags.HasTagExact(It.InputTag))
 					{
 						const FEnhancedInputActionEventBinding& TriggeredEventBinding = InputComponent->BindAction(It.InputAction, ETriggerEvent::Triggered, this, &UDaGameplayAbility_BaseTriggeredInputAction::OnTriggeredInputAction);
 						const uint32 TriggeredEventHandle = TriggeredEventBinding.GetHandle();

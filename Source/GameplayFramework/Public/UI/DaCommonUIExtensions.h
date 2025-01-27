@@ -17,6 +17,9 @@ class GAMEPLAYFRAMEWORK_API UDaCommonUIExtensions : public UBlueprintFunctionLib
 
 public:
 	UDaCommonUIExtensions() { }
+
+	UFUNCTION(BlueprintPure, BlueprintCosmetic, Category = "Global UI Extensions")
+	static ECommonInputType GetInputTypeFromController(const APlayerController* PlayerController);
 	
 	UFUNCTION(BlueprintPure, BlueprintCosmetic, Category = "Global UI Extensions", meta = (WorldContext = "WidgetContextObject"))
 	static ECommonInputType GetOwningPlayerInputType(const UUserWidget* WidgetContextObject);

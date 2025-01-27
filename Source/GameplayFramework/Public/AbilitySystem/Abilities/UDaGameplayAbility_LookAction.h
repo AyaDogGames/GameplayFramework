@@ -18,5 +18,9 @@ class GAMEPLAYFRAMEWORK_API UUDaGameplayAbility_LookAction : public UDaGameplayA
 
 public:
 	UUDaGameplayAbility_LookAction(const FObjectInitializer& ObjectInitializer);
-	
+
+protected:
+
+	void LookMouse(const FInputActionValue& InputValue);
+	void LookStick(const FInputActionValue& InputValue);
 };

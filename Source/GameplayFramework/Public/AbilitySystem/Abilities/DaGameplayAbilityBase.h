@@ -17,5 +17,5 @@ class GAMEPLAYFRAMEWORK_API UDaGameplayAbilityBase : public UGameplayAbility
 public:
 
 	UPROPERTY(EditDefaultsOnly, Category="InputTag")
-	FGameplayTag StartupActivationTag;
+	FGameplayTagContainer StartupActivationTags;
 };

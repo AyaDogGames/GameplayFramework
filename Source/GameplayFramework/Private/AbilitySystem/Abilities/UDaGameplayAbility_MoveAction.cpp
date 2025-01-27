@@ -33,5 +33,5 @@ void UUDaGameplayAbility_MoveAction::OnTriggeredInputAction_Implementation(const
 UUDaGameplayAbility_MoveAction::UUDaGameplayAbility_MoveAction(const FObjectInitializer& ObjectInitializer)
 : Super(ObjectInitializer)
 {
-	StartupActivationTag = CoreGameplayTags::TAG_Input_Move;
+	StartupActivationTags.AddTag(CoreGameplayTags::TAG_Input_Move);
 }

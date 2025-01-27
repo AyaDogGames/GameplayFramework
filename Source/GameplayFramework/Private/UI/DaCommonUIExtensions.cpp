@@ -13,6 +13,23 @@
 
 int32 UDaCommonUIExtensions::InputSuspensions = 0;
 
+ECommonInputType UDaCommonUIExtensions::GetInputTypeFromController(const APlayerController* PlayerController)
+{
+	if (PlayerController)
+	{
+		ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(PlayerController->Player);
+		if (LocalPlayer)
+		{
+			if (const UCommonInputSubsystem* InputSubsystem = UCommonInputSubsystem::Get(LocalPlayer))
+			{
+				return InputSubsystem->GetCurrentInputType();
+			}
+		}
+	}
+
+	return ECommonInputType::Count;
+}
+
 ECommonInputType UDaCommonUIExtensions::GetOwningPlayerInputType(const UUserWidget* WidgetContextObject)
 {
 	if (WidgetContextObject)
