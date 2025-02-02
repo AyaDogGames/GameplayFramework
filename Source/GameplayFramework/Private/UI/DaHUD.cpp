@@ -3,9 +3,12 @@
 
 #include "UI/DaHUD.h"
 
+#include "CoreGameplayTags.h"
 #include "DaPlayerState.h"
 #include "Inventory/DaInventoryUIWidget.h"
 #include "Inventory/DaInventoryWidgetController.h"
+#include "UI/DaCommonUIExtensions.h"
+#include "UI/DaOverlayWidgetBase.h"
 #include "UI/DaOverlayWidgetController.h"
 #include "UI/DaStatMenuWidgetController.h"
 #include "UI/DaUserWidgetBase.h"
@@ -62,30 +65,22 @@ void ADaHUD::InitOverlay(APlayerController* PC, APlayerState* PS, UDaAbilitySyst
 	checkf(OverlayWidgetControllerClass, TEXT("OverlayWidgetControllerClass uninitialized, fill out in HUD blueprint class defaults."));
 	checkf(OverlayWidgetAttributeSetTags.IsValid(), TEXT("OverlayWidgetAttributeSetTags empty, Fill out AttributeSet Tags in HUD blueprint class defaults."));
 	
-	UUserWidget* Widget = CreateWidget<UUserWidget>(PC, OverlayWidgetClass);
-	OverlayWidget = Cast<UDaUserWidgetBase>(Widget);
-
 	const FWidgetControllerParams WidgetControllerParams(PC, PS, ASC, OverlayWidgetAttributeSetTags);
 	UDaOverlayWidgetController* WidgetController = GetOverlayWidgetController(WidgetControllerParams);
-
-	OverlayWidget->SetWidgetController(WidgetController);
-	WidgetController->BroadcastInitialValues();
 	
-	Widget->AddToViewport();
+	RootLayout->PushWidgetToLayerStack<UDaOverlayWidgetBase>(CoreGameplayTags::TAG_UI_Layer_Game, OverlayWidgetClass, [this, WidgetController](UDaOverlayWidgetBase& Widget)
+	{
+		OverlayWidget = Widget;
+		OverlayWidget->SetWidgetController(WidgetController);
+		WidgetController->BroadcastInitialValues();
+	});
 }
 
 void ADaHUD::RemoveOverlay()
 {
-	if (RootLayout)
-	{
-		RootLayout->RemoveFromParent();
-		RootLayout->Destruct();
-	}
-	
 	if (OverlayWidget)
 	{
-		OverlayWidget->RemoveFromParent();
-		OverlayWidget->Destruct();
+		RootLayout->FindAndRemoveWidgetFromLayer(OverlayWidget);
 	}
 
 	if (OverlayWidgetController)

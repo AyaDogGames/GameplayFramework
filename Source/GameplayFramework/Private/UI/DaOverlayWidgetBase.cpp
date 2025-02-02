@@ -11,7 +11,8 @@ void UDaOverlayWidgetBase::NativeWidgetControllerSet()
 {
 	if (UDaOverlayWidgetController* OverlayWidgetController = GetOverlayWidgetController())
 	{
-		OverlayWidgetController->MessageWidgetDataDelegate.AddDynamic(this, &ThisClass::OnMessageDataReceived);
+		if (!OverlayWidgetController->MessageWidgetDataDelegate.IsAlreadyBound(this, &ThisClass::OnMessageDataReceived))
+			OverlayWidgetController->MessageWidgetDataDelegate.AddDynamic(this, &ThisClass::OnMessageDataReceived);
 	}
 	
 	Super::NativeWidgetControllerSet();
@@ -30,8 +31,9 @@ void UDaOverlayWidgetBase::OnMessageDataReceived(const FDaUIWidgetMessageData& D
 				// position in the center of the viewport
 				FVector2d Size = UWidgetLayoutLibrary::GetViewportSize(this);
 				MessageWidget->SetPositionInViewport(FVector2D(Size.X * 0.5f, Size.Y * 0.5f));
-
+				
 				MessageWidget->AddToViewport();
+				
 			}
 		}
 	}

@@ -3,14 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DaUserWidgetBase.h"
+#include "Blueprint/UserWidget.h"
 #include "DaMessageWidget.generated.h"
 
 /**
  * 
  */
 UCLASS()
-class GAMEPLAYFRAMEWORK_API UDaMessageWidget : public UDaUserWidgetBase
+class GAMEPLAYFRAMEWORK_API UDaMessageWidget : public UUserWidget
 {
 	GENERATED_BODY()
 

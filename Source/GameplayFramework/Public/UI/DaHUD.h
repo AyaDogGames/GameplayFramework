@@ -35,7 +35,11 @@ public:
 	UDaInventoryWidgetController* GetInventoryWidgetController(const FWidgetControllerParams& WCParams);
 
 	void InitRootLayout(APlayerController* PC, APlayerState* PS, UDaAbilitySystemComponent* ASC);
+
+	UFUNCTION(BlueprintCallable)
 	void InitOverlay(APlayerController* PC, APlayerState* PS, UDaAbilitySystemComponent* ASC);
+
+	UFUNCTION(BlueprintCallable)
 	void RemoveOverlay();
 
 	FORCEINLINE FGameplayTagContainer GetOverlayAttributeSetTags() { return OverlayWidgetAttributeSetTags; } 
