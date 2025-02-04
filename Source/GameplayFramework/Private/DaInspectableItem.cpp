@@ -50,7 +50,7 @@ ADaInspectableItem::ADaInspectableItem()
 	ScaleFactor = 1.0f;
 }
 
-void ADaInspectableItem::AddToInventory(APawn* InstigatorPawn)
+void ADaInspectableItem::AddToInventory(APawn* InstigatorPawn, bool bDestroyActor)
 {
 	checkf(TypeTags.IsValid(), TEXT("ADaInspectableItem: TypeTags is not valid!"));
 
@@ -62,7 +62,9 @@ void ADaInspectableItem::AddToInventory(APawn* InstigatorPawn)
 			if (InventoryComponent->AddItem(this) && HasAuthority())
 			{
 				Execute_ItemAddedToInventory(this);
-				Destroy();
+
+				if (bDestroyActor)
+					Destroy();
 			}
 		}
 	}

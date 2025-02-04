@@ -36,6 +36,9 @@ public:
 	int32 GetItemTags(FGameplayTagContainer& OutItemTags) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
+	UTexture2D* GetItemThumbnail() const;
+	
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
 	UMaterialInterface* GetRenderTargetMaterial() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
@@ -47,5 +50,5 @@ public:
 	UFUNCTION(BlueprintImplementableEvent)
 	void ItemAddedToInventory();
 	
-	virtual void AddToInventory(APawn* InstigatorPawn) = 0;
+	virtual void AddToInventory(APawn* InstigatorPawn, bool bDestroyActor = true) = 0;
 };

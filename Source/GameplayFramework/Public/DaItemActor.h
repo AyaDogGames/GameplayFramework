@@ -40,7 +40,7 @@ public:
 	virtual UMaterialInterface* GetRenderTargetMaterial_Implementation() const override { return RenderTargetMaterial; }
 	virtual UDaAbilitySet* GetAbilitySet_Implementation() const override { return OwnedAbilitySet; }
 	virtual UStaticMeshComponent* GetMeshComponent_Implementation() const override { return MeshComp; }
-	virtual void AddToInventory(APawn* InstigatorPawn) override;
+	virtual void AddToInventory(APawn* InstigatorPawn, bool bDestroyActor = true) override;
 	
 	static ADaItemActor* CreateFromInventoryItem(const FDaInventoryItemData& InventoryData);
 	void GrantSetToActor(UDaAbilitySystemComponent* ReceivingASC);

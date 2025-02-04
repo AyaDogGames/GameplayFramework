@@ -43,7 +43,7 @@ void ADaItemActor::BeginPlay()
 	}
 }
 
-void ADaItemActor::AddToInventory(APawn* InstigatorPawn)
+void ADaItemActor::AddToInventory(APawn* InstigatorPawn, bool bDestroyActor)
 {
 	checkf(TypeTags.IsValid(), TEXT("ItemActor: TypeTags is not valid!"));
 	
@@ -55,7 +55,9 @@ void ADaItemActor::AddToInventory(APawn* InstigatorPawn)
 			if (InventoryComponent->AddItem(this) && HasAuthority())
 			{
 				Execute_ItemAddedToInventory(this);
-				Destroy();
+				
+				if (bDestroyActor)
+					Destroy();
 			}
 		}
 	}
