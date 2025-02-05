@@ -113,3 +113,16 @@ USlateBrushAsset* UDaRenderUtilLibrary::CreateSlateBrushFromMaterial(UMaterialIn
     BrushAsset->Brush.ImageSize = ImageSize; //FVector2D(256.f, 256.f); // Match your render target size
     return BrushAsset;
 }
+
+USlateBrushAsset* UDaRenderUtilLibrary::CreateSlateBrushFromTexture2D(UTexture2D* Image, const FVector2D& ImageSize)
+{
+    if (!Image)
+    {
+        return nullptr;
+    }
+
+    USlateBrushAsset* BrushAsset = NewObject<USlateBrushAsset>();
+    BrushAsset->Brush.SetResourceObject(Image);
+    BrushAsset->Brush.ImageSize = ImageSize; //FVector2D(256.f, 256.f); // Match your render target size
+    return BrushAsset;
+}

@@ -12,7 +12,7 @@ struct FDaInventoryItemData;
 
 // This class does not need to be modified.
 UINTERFACE()
-class UDaInventoryItemInterface : public UInterface
+class GAMEPLAYFRAMEWORK_API UDaInventoryItemInterface : public UInterface
 {
 	GENERATED_BODY()
 };

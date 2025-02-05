@@ -7,6 +7,7 @@
 #include "DaPickup_Ability.h"
 #include "DaRenderUtilLibrary.h"
 #include "GameplayFramework.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Inventory/DaStackableInventoryItem.h"
 
 static TAutoConsoleVariable<bool> CVarDebugRenderIconToDisk(TEXT("da.InventoryItemIconToDisk"), false, TEXT("Enable Dumping Generated Icon Textures to file at: C:/Temp/RenderTargetOutput.png."), ECVF_Cheat);
@@ -60,8 +61,15 @@ UDaInventoryItemBase* UDaBaseInventoryItemFactory::CreateInventoryItem(const UOb
 		{
 			LOG_WARNING("InventoryItemFactory::CreateInventoryItem: Failed to create FGuid ItemID");
 		}
-
+		
 		FVector2d ImageSize = FVector2D(64, 64);
+		if (UTexture2D* Image = IDaInventoryItemInterface::Execute_GetItemThumbnail(SourceObject))
+		{
+			// First check if there is already a thumbnail and if so, just use that and early out
+			Data.ThumbnailBrush = UDaRenderUtilLibrary::CreateSlateBrushFromTexture2D(Image, ImageSize);
+			return UDaInventoryItemBase::CreateFromData(Data);
+		}
+		
 		UTextureRenderTarget2D* ThumbnailRT = UDaRenderUtilLibrary::GenerateThumbnailWithRenderTarget(IDaInventoryItemInterface::Execute_GetMeshComponent(SourceObject), ImageSize, SourceObject->GetWorld());
 		if (ThumbnailRT)
 		{
