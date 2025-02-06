@@ -133,5 +133,15 @@ public:
 	// If the item itself can host an inventory
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	UDaInventoryComponent* GetNestedInventory() const;
-   
+
+	// This may or may not be valid if the object was destroyed when adding to inventory. Always check IsValid or not null before using.
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UObject* GetBaseObject() const { return BaseObject.Get(); }
+	
+	void SetBaseObject(const UObject* Object) { BaseObject = const_cast<UObject*>(Object); }
+	
+protected:
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UObject> BaseObject;
 };
