@@ -22,13 +22,21 @@ public:
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
 	// Gets the ability system component used for game wide things
-	UFUNCTION(BlueprintCallable, Category = "DA|GameState")
-	UDaAbilitySystemComponent* GetLyraAbilitySystemComponent() const { return AbilitySystemComponent; }
+	UFUNCTION(BlueprintCallable, Category = "DAGameState")
+	UDaAbilitySystemComponent* GetDaAbilitySystemComponent() const { return AbilitySystemComponent; }
+
+protected:
+
+	void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	// How much game time passes every real world second. Default is 1 which means game time matches real world time. If set to 10 for example, then 10 minutes passes every second.
+	UPROPERTY(EditDefaultsOnly, Replicated, Category = "DAGameState")
+	float GameTimeInterval;
 
 private:
 
 	// The ability system component subobject for game-wide things (primarily gameplay cues)
-	UPROPERTY(VisibleAnywhere, Category = "DA|GameState")
+	UPROPERTY(VisibleAnywhere, Category = "DAGameState")
 	TObjectPtr<UDaAbilitySystemComponent> AbilitySystemComponent;
 
 	virtual void PostInitializeComponents() override;
