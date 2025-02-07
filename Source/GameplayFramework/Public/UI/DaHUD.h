@@ -56,39 +56,43 @@ protected:
 	
 	UPROPERTY(EditAnywhere, Category=UI)
 	TSubclassOf<UDaOverlayWidgetController> OverlayWidgetControllerClass;
-	
-	UPROPERTY(EditAnywhere, Category=UI)
-	FGameplayTagContainer OverlayWidgetAttributeSetTags;
-	
+
 	UPROPERTY(EditAnywhere, Category=UI)
 	TSubclassOf<UDaStatMenuWidgetController> StatMenuWidgetControllerClass;
 
 	UPROPERTY(EditAnywhere, Category=UI)
-	FGameplayTagContainer StatMenuWidgetAttributeSetTags;
+	TSubclassOf<UDaInventoryWidgetController> InventoryWidgetControllerClass;
+
+	// Attribute Set Tags
 	
 	UPROPERTY(EditAnywhere, Category=UI)
-	TSubclassOf<UDaInventoryWidgetController> InventoryWidgetControllerClass;
+	FGameplayTagContainer OverlayWidgetAttributeSetTags;
+
+	UPROPERTY(EditAnywhere, Category=UI)
+	FGameplayTagContainer StatMenuWidgetAttributeSetTags;
 
 	UPROPERTY(EditAnywhere, Category=UI)
 	FGameplayTagContainer InventoryWidgetAttributeSetTags;
 
-	UPROPERTY(BlueprintAssignable, Category="Events")
-	FOnOnPrimaryGameLayoutLoaded OnPrimaryGameLayoutLoaded;
+	// Instances
 	
-private:
-
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=UI)
 	TObjectPtr<UDaPrimaryGameLayout> RootLayout;
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=UI)
 	TObjectPtr<UDaUserWidgetBase> OverlayWidget;
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=UI)
 	TObjectPtr<UDaOverlayWidgetController> OverlayWidgetController;
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=UI)
 	TObjectPtr<UDaStatMenuWidgetController> StatMenuWidgetController;
 	
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=UI)
 	TObjectPtr<UDaInventoryWidgetController> InventoryWidgetController;
+
+	// Events
+	
+	UPROPERTY(BlueprintAssignable, Category="Events")
+	FOnOnPrimaryGameLayoutLoaded OnPrimaryGameLayoutLoaded;
 };

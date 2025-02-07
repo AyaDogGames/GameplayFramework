@@ -36,7 +36,8 @@ public class GameplayFramework : ModuleRules
 				"GameplayTags", 
 				"AIModule", 
 				"CommonUI",
-				"CommonInput"
+				"CommonInput",
+				"ModelViewViewModel"
 			}
 			);
 			
