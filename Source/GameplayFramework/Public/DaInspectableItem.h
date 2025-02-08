@@ -74,6 +74,9 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Inspect")
 	TSoftObjectPtr<UStaticMesh> DetailedMeshPtr;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inspect")
+	int CustomDepthStencilValue = 250;
+	
 	// Viewport configuration
 	UPROPERTY(EditAnywhere, Category = "Inspect")
 	float ViewportPercentage = 0.6f;
