@@ -3,9 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "DaInventoryBlueprintLibrary.generated.h"
 
+struct FDaInventoryItemData;
 class UDaInventoryItemBase;
 /**
  * 
@@ -16,6 +18,9 @@ class GAMEPLAYFRAMEWORK_API UDaInventoryBlueprintLibrary : public UBlueprintFunc
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	static TSubclassOf<UDaInventoryItemBase> GetInventoryItemClassFromTags(const FGameplayTagContainer& Tags);
+	
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	static TSubclassOf<UDaInventoryItemBase> GetInventoryItemClass(const UObject* SourceObject);
 

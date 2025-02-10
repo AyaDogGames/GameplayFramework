@@ -6,6 +6,21 @@
 #include "Inventory/DaInventoryItemBase.h"
 #include "Inventory/DaInventoryItemFactory.h"
 
+TSubclassOf<UDaInventoryItemBase> UDaInventoryBlueprintLibrary::GetInventoryItemClassFromTags(const FGameplayTagContainer& Tags)
+{
+	if (Tags.IsValid())
+	{
+		for (const TScriptInterface<IDaInventoryItemFactory>& Factory : UDaInventoryItemBase::Factories)
+		{
+			if (TSubclassOf<UDaInventoryItemBase> ItemClass = Factory->DetermineInventoryItemClassFromTags(Tags))
+			{
+				return ItemClass;
+			}
+		}
+	}
+	return nullptr;
+}
+
 TSubclassOf<UDaInventoryItemBase> UDaInventoryBlueprintLibrary::GetInventoryItemClass(const UObject* SourceObject)
 {
 	for (const TScriptInterface<IDaInventoryItemFactory>& Factory : UDaInventoryItemBase::Factories)
@@ -29,3 +44,4 @@ UDaInventoryItemBase* UDaInventoryBlueprintLibrary::CreateInventoryItem(const UO
 	}
 	return nullptr;
 }
+

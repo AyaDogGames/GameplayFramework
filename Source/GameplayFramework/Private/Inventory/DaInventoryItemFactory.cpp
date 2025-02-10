@@ -12,6 +12,31 @@
 
 static TAutoConsoleVariable<bool> CVarDebugRenderIconToDisk(TEXT("da.InventoryItemIconToDisk"), false, TEXT("Enable Dumping Generated Icon Textures to file at: C:/Temp/RenderTargetOutput.png."), ECVF_Cheat);
 
+TSubclassOf<UDaInventoryItemBase> UDaBaseInventoryItemFactory::DetermineInventoryItemClassFromTags(
+	const FGameplayTagContainer& Tags) const
+{
+	if (Tags.IsValid())
+	{
+		if (Tags.HasTagExact(CoreGameplayTags::InventoryItem_Stackable))
+		{
+			return UDaStackableInventoryItem::StaticClass();
+		}
+
+		if (Tags.HasTagExact(CoreGameplayTags::InventoryItem_Equipable))
+		{
+			// TODO: make an equipableItem class
+			return UDaInventoryItemBase::StaticClass();
+		}
+		
+		if (Tags.HasTagExact(CoreGameplayTags::InventoryItem))
+		{
+			return UDaInventoryItemBase::StaticClass(); 
+		}
+	}
+
+	return nullptr;
+}
+
 // Add default functionality here for any IDaInventoryItemFactory functions that are not pure virtual.
 TSubclassOf<UDaInventoryItemBase> UDaBaseInventoryItemFactory::DetermineInventoryItemClass(
 	const UObject* SourceObject) const
@@ -19,26 +44,8 @@ TSubclassOf<UDaInventoryItemBase> UDaBaseInventoryItemFactory::DetermineInventor
 	if (const IDaInventoryItemInterface* Pickup = Cast<IDaInventoryItemInterface>(SourceObject))
 	{
 		FGameplayTagContainer Tags;
-		int32 NumTags = IDaInventoryItemInterface::Execute_GetItemTags(SourceObject, Tags);
-		
-		if (Tags.IsValid())
-		{
-			if (Tags.HasTagExact(CoreGameplayTags::InventoryItem_Stackable))
-			{
-				return UDaStackableInventoryItem::StaticClass();
-			}
-
-			if (Tags.HasTagExact(CoreGameplayTags::InventoryItem_Equipable))
-			{
-				// TODO: make an equipableItem class
-				return UDaInventoryItemBase::StaticClass();
-			}
-		
-			if (Tags.HasTagExact(CoreGameplayTags::InventoryItem))
-			{
-				return UDaInventoryItemBase::StaticClass(); 
-			}
-		}
+		IDaInventoryItemInterface::Execute_GetItemTags(SourceObject, Tags);
+		return UDaBaseInventoryItemFactory::DetermineInventoryItemClassFromTags(Tags);
 	}
 
 	return nullptr;
