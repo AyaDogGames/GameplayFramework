@@ -3,7 +3,6 @@
 
 #include "DaGameStateBase.h"
 
-#include "../../../../../../../../../../Program Files/Epic Games/UE_5.5/Engine/Plugins/Runtime/ModelViewViewModel/Source/ModelViewViewModel/Public/MVVMGameSubsystem.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
 #include "Net/UnrealNetwork.h"
 
@@ -35,12 +34,4 @@ void ADaGameStateBase::PostInitializeComponents()
 	check(AbilitySystemComponent);
 	AbilitySystemComponent->InitAbilityActorInfo(/*Owner=*/ this, /*Avatar=*/ this);
 
-	// if (UGameInstance* GameInstance = GetGameInstance())
-	// {
-	// 	if (UMVVMGameSubsystem* ModelViewSubsystem = UGameInstance::GetSubsystem<UMVVMGameSubsystem>(GameInstance))
-	// 	{
-	// 		// Setup any global Data for UI to display here, such as list of players etc.
-	// 		
-	// 	}
-	// }
 }
