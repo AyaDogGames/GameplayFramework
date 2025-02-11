@@ -45,7 +45,7 @@ TSubclassOf<UDaInventoryItemBase> UDaBaseInventoryItemFactory::DetermineInventor
 	{
 		FGameplayTagContainer Tags;
 		IDaInventoryItemInterface::Execute_GetItemTags(SourceObject, Tags);
-		return UDaBaseInventoryItemFactory::DetermineInventoryItemClassFromTags(Tags);
+		return DetermineInventoryItemClassFromTags(Tags);
 	}
 
 	return nullptr;
