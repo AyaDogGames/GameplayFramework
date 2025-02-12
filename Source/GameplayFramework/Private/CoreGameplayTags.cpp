@@ -103,6 +103,10 @@ namespace CoreGameplayTags
 	UE_DEFINE_GAMEPLAY_TAG(TAG_Pickup_Credits, "Pickup.Credits")
 	UE_DEFINE_GAMEPLAY_TAG(TAG_Pickup_Mana, "Pickup.Mana")
 	UE_DEFINE_GAMEPLAY_TAG(TAG_Pickup_Ability, "Pickup.Ability")
+
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Level, "Level");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Level_ID, "Level.ID");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Level_POI, "Level.POI");
 	
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Behavior_SurvivesDeath, "Ability.Behavior.SurvivesDeath", "An ability with this type tag should not be canceled due to death.");
 
