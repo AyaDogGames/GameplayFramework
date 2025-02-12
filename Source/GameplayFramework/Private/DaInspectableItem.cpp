@@ -26,10 +26,11 @@ ADaInspectableItem::ADaInspectableItem()
 	PreviewMeshComponent->SetupAttachment(RootComponent);
 	PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
-	InspectMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("InspectMesh"));
+	InspectMeshComponent = CreateDefaultSubobject<USceneComponent>(TEXT("InspectSceneComponent"));
 	InspectMeshComponent->SetupAttachment(RootComponent);
-	InspectMeshComponent->SetVisibility(false); // Initially hidden
-	InspectMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	InspectMeshComponent->SetVisibility(false);
+	
+	DetailedMeshComponent = nullptr;
 
 	// Initialize defaults
 	CameraDistance = 1.2f;
@@ -47,8 +48,26 @@ ADaInspectableItem::ADaInspectableItem()
 	CurrentRotation = FRotator::ZeroRotator;
 	CurrentLocation = FVector::ZeroVector;
 
+	BaseDetailMeshTransform = FTransform::Identity;
+	
 	ScaleFactor = 1.0f;
 }
+
+void ADaInspectableItem::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	if (SetupDetailMeshComponent())
+	{
+		DetailedMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		DetailedMeshComponent->SetVisibility(false);
+	}
+	else
+	{
+		LOG_ERROR("Failed to setup detail mesh component");
+	}
+}
+
 
 void ADaInspectableItem::AddToInventory(APawn* InstigatorPawn, bool bDestroyActor)
 {
@@ -86,15 +105,11 @@ void ADaInspectableItem::Inspect(APawn* InstigatorPawn, float ViewportPct,
 	InspectingPawn = InstigatorPawn;
 	CurrentViewportPercentage = ViewportPct;
 	CurrentAlignment = Alignment;
-	InspectMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	
-	if (LoadedDetailedMesh == nullptr)
+	if (DetailedMeshComponent != nullptr)
 	{
-		LoadDetailMesh();
-	}
-	else
-	{
-		InspectMeshComponent->SetVisibility(true);
+		DetailedMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		DetailedMeshComponent->SetVisibility(true);
 		PreviewMeshComponent->SetVisibility(false);
 		
 		PlaceDetailMeshInView();
@@ -111,7 +126,7 @@ void ADaInspectableItem::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	if (bIsInspecting && LoadedDetailedMesh)
+	if (bIsInspecting)
 	{
 		// TODO: Do this based on player movement events or anything that marks dirty and update needed, rather than tick
 		UpdateMeshTransform(DeltaSeconds);
@@ -120,7 +135,7 @@ void ADaInspectableItem::Tick(float DeltaSeconds)
 
 void ADaInspectableItem::UpdateMeshTransform(float DeltaTime)
 {
-	if (!InspectMeshComponent)
+	if (!DetailedMeshComponent)
 		return;
 	
 	// Update rotation
@@ -156,8 +171,8 @@ void ADaInspectableItem::UpdateMeshTransform(float DeltaTime)
 		CurrentRotation = FMath::RInterpTo(CurrentRotation, NewRotation, DeltaTime, RotationSmoothingSpeed);
 		
 		// Apply updated transform
-		InspectMeshComponent->SetWorldLocation(CurrentLocation);
-		InspectMeshComponent->SetWorldRotation(CurrentRotation);
+		DetailedMeshComponent->SetWorldLocation(CurrentLocation);
+		DetailedMeshComponent->SetWorldRotation(CurrentRotation);
 
 		if (CVarInspectTickDebug.GetValueOnGameThread())
 		{
@@ -170,50 +185,39 @@ void ADaInspectableItem::UpdateMeshTransform(float DeltaTime)
 	
 }
 
-
-void ADaInspectableItem::LoadDetailMesh()
+bool ADaInspectableItem::SetupDetailMeshComponent()
 {
-	// Start async loading of the detailed mesh
-	DetailedMeshHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(
-		DetailedMeshPtr.ToSoftObjectPath(),
-		FStreamableDelegate::CreateUObject(this, &ADaInspectableItem::OnDetailedMeshLoaded)
-	);
-}
-
-void ADaInspectableItem::OnDetailedMeshLoaded()
-{
-	if (DetailedMeshPtr.IsValid())
+	if (DetailedMeshComponent != nullptr)
+		return true;
+	
+	TArray<USceneComponent*> ChildrenArray;
+	InspectMeshComponent->GetChildrenComponents(false, ChildrenArray);
+	for (USceneComponent* Child : ChildrenArray)
 	{
-		LoadedDetailedMesh = Cast<UStaticMesh>(DetailedMeshPtr.Get());
-		if (LoadedDetailedMesh)
+		if (Child && Child->IsA(UStaticMeshComponent::StaticClass()))
 		{
-			InspectMeshComponent->SetStaticMesh(LoadedDetailedMesh);
-			
-			InspectMeshComponent->SetVisibility(true);
-			PreviewMeshComponent->SetVisibility(false);
-			
-			PlaceDetailMeshInView();
+			DetailedMeshComponent = Cast<UStaticMeshComponent>(Child);
+			BaseDetailMeshTransform = DetailedMeshComponent->GetComponentTransform();
+			return true;
 		}
 	}
-	else
-	{
-		LOG_ERROR("Failed to load detailed mesh.");
-		HideDetailedMesh();
-	}
+
+	return false;
 }
 
 // Adjust mesh placement in the viewport
 void ADaInspectableItem::PlaceDetailMeshInView_Implementation()
 {
 	check(InspectingPawn);
-
+	check(DetailedMeshComponent);
+											
 	// Apply initial scaling
-	InspectMeshComponent->SetWorldScale3D(FVector(1.0f));
-	InspectMeshComponent->MarkRenderStateDirty();
-	InspectMeshComponent->UpdateBounds();
+	//DetailedMeshComponent->SetWorldScale3D(FVector(1.0f));
+	DetailedMeshComponent->MarkRenderStateDirty();
+	DetailedMeshComponent->UpdateBounds();
 	
 	// Calculate initial mesh fit (center, scale, and position)
-	FBoxSphereBounds MeshBounds = InspectMeshComponent->Bounds;
+	FBoxSphereBounds MeshBounds = DetailedMeshComponent->Bounds;
 	FVector MeshOrigin = MeshBounds.Origin;
 	FVector MeshExtent = MeshBounds.BoxExtent;
 	float MeshDiameter = MeshExtent.GetMax() * 2.0f;
@@ -246,18 +250,20 @@ void ADaInspectableItem::PlaceDetailMeshInView_Implementation()
 		ScaleFactor = DesiredHeight / MeshDiameter;
 		
 		// Apply Initial Scale
-		InspectMeshComponent->SetWorldScale3D(FVector(ScaleFactor));
+		FVector CurrentScale = DetailedMeshComponent->GetRelativeScale3D();
+		DetailedMeshComponent->SetWorldScale3D(CurrentScale*ScaleFactor);
 		
 		// Force bounds update
-		InspectMeshComponent->MarkRenderStateDirty();
-		InspectMeshComponent->UpdateBounds();
+		DetailedMeshComponent->MarkRenderStateDirty();
+		DetailedMeshComponent->UpdateBounds();
 		
 		// Get the updated mesh component's bounds in local space
-		MeshBounds = InspectMeshComponent->GetStaticMesh()->GetBounds();
-		CenteringOffset = MeshBounds.Origin * InspectMeshComponent->GetComponentScale();
+		MeshBounds = DetailedMeshComponent->GetStaticMesh()->GetBounds();
+		CenteringOffset = MeshBounds.Origin * DetailedMeshComponent->GetComponentScale();
+		CenteringOffset = MeshBounds.Origin * DetailedMeshComponent->GetComponentScale();
 		
-		CurrentLocation = InspectMeshComponent->GetComponentLocation();
-		CurrentRotation = InspectMeshComponent->GetComponentRotation();
+		CurrentLocation = DetailedMeshComponent->GetComponentLocation();
+		CurrentRotation = DetailedMeshComponent->GetComponentRotation();
 		
 		FVector AlignmentOffset = FVector::ZeroVector;
 		if (CurrentAlignment != EInspectAlignment::Center)
@@ -301,9 +307,9 @@ void ADaInspectableItem::HideDetailedMesh()
 	PreviewMeshComponent->SetVisibility(true);
 
 	// Hide reset and disable collision on detailed mesh
-	InspectMeshComponent->SetVisibility(false);
-	InspectMeshComponent->SetRelativeTransform(FTransform());
-	InspectMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DetailedMeshComponent->SetVisibility(false);
+	DetailedMeshComponent->SetWorldTransform(BaseDetailMeshTransform);
+	DetailedMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	// Disables calling updates on detail mesh in Tick function 
 	bIsInspecting = false; 

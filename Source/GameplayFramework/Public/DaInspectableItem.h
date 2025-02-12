@@ -69,11 +69,11 @@ protected:
 	TObjectPtr<UStaticMeshComponent> PreviewMeshComponent;
 
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category="Components")
-	TObjectPtr<UStaticMeshComponent> InspectMeshComponent;
+	TObjectPtr<USceneComponent> InspectMeshComponent;
 
-	UPROPERTY(EditAnywhere, Category = "Inspect")
-	TSoftObjectPtr<UStaticMesh> DetailedMeshPtr;
-
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Inspect")
+	TSoftObjectPtr<UStaticMeshComponent> DetailedMeshComponent;
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inspect")
 	int CustomDepthStencilValue = 250;
 	
@@ -124,18 +124,9 @@ protected:
 	void PlaceDetailMeshInView();
 
 	virtual void Tick(float DeltaSeconds) override;
-
+	virtual void PostInitializeComponents() override;
+	
 private:
-
-	UPROPERTY()
-	UStaticMesh* LoadedDetailedMesh;
-	
-	void LoadDetailMesh();
-	void OnDetailedMeshLoaded();
-	
-	// Asset loading handles
-	TSharedPtr<FStreamableHandle> DetailedMeshHandle;
-
 	bool bIsInspecting = false;
 
 	UPROPERTY()
@@ -143,12 +134,15 @@ private:
 
 	float CurrentViewportPercentage;
 	EInspectAlignment CurrentAlignment;
+
+	// Pre-inspect base transform so we can restore everything to the original.
+	FTransform BaseDetailMeshTransform;
 	
 	// Mesh properties
 	float CameraDistance;
 	FRotator CurrentRotation;
 	FVector CurrentLocation;
-
+	
 	// Rotation deltas set via RotateDetailedMesh function
 	float InputDeltaPitch;
 	float InputDeltaYaw;
@@ -162,5 +156,6 @@ private:
 
 	// Utility functions
 	void UpdateMeshTransform(float DeltaTime);
+	bool SetupDetailMeshComponent();
 	
 };
