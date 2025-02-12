@@ -5,7 +5,6 @@
 
 #include "CoreGameplayTags.h"
 #include "GameplayFramework.h"
-#include "IDetailTreeNode.h"
 #include "Inventory/DaInventoryItemBase.h"
 
 

@@ -11,6 +11,7 @@ class UParticleSystem;
 class UProjectileMovementComponent;
 class USphereComponent;
 class UAudioComponent;
+class USoundCue;
 
 UCLASS()
 class GAMEPLAYFRAMEWORK_API ADaProjectile : public AActor
