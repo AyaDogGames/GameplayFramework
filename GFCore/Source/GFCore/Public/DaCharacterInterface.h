@@ -17,7 +17,7 @@ class UDaCharacterInterface : public UInterface
  * 
  */
 
-class GAMEPLAYFRAMEWORK_API IDaCharacterInterface
+class GFCORE_API IDaCharacterInterface
 {
 	GENERATED_BODY()
 

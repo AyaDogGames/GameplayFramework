@@ -3,7 +3,7 @@
 #include "NativeGameplayTags.h"
 
 // Use our own macro (which adds the module name) to declare the gameplay tags 
-#define DA_DECLARE_GAMEPLAY_TAG_EXTERN(TagName) GAMEPLAYFRAMEWORK_API extern FNativeGameplayTag TagName;
+#define DA_DECLARE_GAMEPLAY_TAG_EXTERN(TagName) GFCORE_API extern FNativeGameplayTag TagName;
 
 // Utility to get leaf tags from a parent tag if it exists in a tag container
 static FGameplayTag GetSpecificTag(const FGameplayTagContainer& TagContainer, const FGameplayTag& BaseTag)

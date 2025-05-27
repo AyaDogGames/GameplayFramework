@@ -22,6 +22,10 @@
 		}
 	],
 	"Plugins": [
+        {
+            "Name": "GFCore",
+            "Enabled": true
+        },
 		{
 			"Name": "GameplayAbilities",
 			"Enabled": true

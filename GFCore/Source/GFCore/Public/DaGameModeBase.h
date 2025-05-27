@@ -14,7 +14,7 @@ class AController;
  * 
  */
 UCLASS(Config = Game)
-class GAMEPLAYFRAMEWORK_API ADaGameModeBase : public AGameModeBase
+class GFCORE_API ADaGameModeBase : public AGameModeBase
 {
 	GENERATED_BODY()
 

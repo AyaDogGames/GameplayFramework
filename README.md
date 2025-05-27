@@ -5,6 +5,8 @@ The gameplay framework is an Unreal 5.5 C++ plugin that simplifies creating a fu
 ## Overview
 
 The plugin utilizes the Gameplay Ability System (GAS) and while originally influenced by the Epic Games Lyra example; it is different. It combines several concepts such as data driven ability set creation and provides an optional attribute component that is responsible for handling vital attributes like Health and Death of an actor, but any attributes can be created in game as long as they are vended using the parent gameplay tags provided in the plugin. For example, One could use the Attributes.Stats.Primary and the Attributes.Stat.Secondary and subclass DaBaseAttributeSet to create a set of Attributes for their specific game. The base class would need a parent SetIdentifierTag (in this case Attributes.Stats), and would nee dto asssociate all Attributes with gameplay tags in the constructor like so: TagsToAttributes.Add(YourGameplayTags::AttributesStatsPrimaryStrength, GetStrengthAttribute);
+The framework is being split into smaller plugins. The first of these is **GFCore**, containing base character classes and the ability system component. Enable GFCore alongside GameplayFramework when building your project.
+
 
 UI Base classes that handle and vend attribute updates are also provided. A WidgetController subclass will be associcated with attribute set tag and look for all attributes in the set and provide updates whenever their values change using multicast delegate methods. 
 

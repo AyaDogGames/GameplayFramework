@@ -25,6 +25,7 @@ public class GameplayFramework : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
+                                "GFCore",
 				"Core", 
 				"CoreUObject", 
 				"Engine", 
