@@ -18,7 +18,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FEffectAssetTags, const FGameplayTagContaine
  * 
  */
 UCLASS()
-class GAMEPLAYFRAMEWORK_API UDaAbilitySystemComponent : public UAbilitySystemComponent
+class GFCORE_API UDaAbilitySystemComponent : public UAbilitySystemComponent
 {
 	GENERATED_BODY()
 

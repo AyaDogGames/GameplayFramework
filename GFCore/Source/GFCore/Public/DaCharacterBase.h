@@ -15,7 +15,7 @@ class UDaAttributeComponent;
 class UDaWorldUserWidget;
 
 UCLASS()
-class GAMEPLAYFRAMEWORK_API ADaCharacterBase : public ACharacter, public IAbilitySystemInterface, public IDaCharacterInterface
+class GFCORE_API ADaCharacterBase : public ACharacter, public IAbilitySystemInterface, public IDaCharacterInterface
 {
 	GENERATED_BODY()
 

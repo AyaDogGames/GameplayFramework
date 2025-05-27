@@ -31,7 +31,7 @@ enum class EDaDeathState : uint8
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class GAMEPLAYFRAMEWORK_API UDaAttributeComponent : public UActorComponent
+class GFCORE_API UDaAttributeComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
