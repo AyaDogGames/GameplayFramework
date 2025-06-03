@@ -9,6 +9,7 @@
 #include "GameplayTagContainer.h"
 #include "Inventory/DaInventoryBlueprintLibrary.h"
 #include "Inventory/DaStackableInventoryItem.h"
+#include "Inventory/DaMcpInventoryServerSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
 
@@ -215,9 +216,21 @@ bool UDaInventoryComponent::AddItem(const UObject* SourceObject, int32 SlotIndex
 							FilledSlots++;
 						}
 
-						// broadcast our changes to the specific slot
-						NotifyInventoryChanged(SlotIndex);
-						return true;
+                                                // broadcast our changes to the specific slot
+                                                NotifyInventoryChanged(SlotIndex);
+
+                                                if (GetOwnerRole() == ROLE_Authority)
+                                                {
+                                                        if (UGameInstance* GI = GetWorld()->GetGameInstance())
+                                                        {
+                                                                if (UDaMcpInventoryServerSubsystem* MCP = GI->GetSubsystem<UDaMcpInventoryServerSubsystem>())
+                                                                {
+                                                                        MCP->AddItemToServer(GetOwner(), CurrentItem->ToData());
+                                                                }
+                                                        }
+                                                }
+
+                                                return true;
 					}
 				}
 			}
@@ -298,10 +311,21 @@ bool UDaInventoryComponent::RemoveItem(int32 SlotIndex)
 					FilledSlots--;
 				}
 
-				// broadcast our changes to the specific slot
-				NotifyInventoryChanged(SlotIndex);
-				
-				return true;
+                                // broadcast our changes to the specific slot
+                                NotifyInventoryChanged(SlotIndex);
+
+                                if (GetOwnerRole() == ROLE_Authority)
+                                {
+                                        if (UGameInstance* GI = GetWorld()->GetGameInstance())
+                                        {
+                                                if (UDaMcpInventoryServerSubsystem* MCP = GI->GetSubsystem<UDaMcpInventoryServerSubsystem>())
+                                                {
+                                                        MCP->RemoveItemFromServer(GetOwner(), OldData.ItemID);
+                                                }
+                                        }
+                                }
+
+                                return true;
 			}
 		}
 	}

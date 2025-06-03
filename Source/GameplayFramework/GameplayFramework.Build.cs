@@ -42,16 +42,17 @@ public class GameplayFramework : ModuleRules
 			);
 			
 		
-		PrivateDependencyModuleNames.AddRange(
-			new string[]
-			{
-				"Slate",
-				"SlateCore",
-				"UMG", 
-				"Niagara",
-				"NavigationSystem",
-			}
-			);
+                PrivateDependencyModuleNames.AddRange(
+                        new string[]
+                        {
+                                "Slate",
+                                "SlateCore",
+                                "UMG",
+                                "Niagara",
+                                "NavigationSystem",
+                                "Http",
+                        }
+                        );
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(
