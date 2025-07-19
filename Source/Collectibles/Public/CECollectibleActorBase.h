@@ -72,7 +72,6 @@ protected:
 	virtual USlateBrushAsset* GetItemBrush_Implementation() const override;
 	virtual UTexture2D* GetItemIcon_Implementation() const override;
 	virtual FCECollectibleDataDef GetDataRef_Implementation() const override;
-	virtual FCECoinCoreDataRef GetTemplateDataRef_Implementation() const override;
 	virtual void SetCollectibleData_Implementation(UCECollectibleData* Data) override;
 	virtual FString GetCollectibleDisplayNames_Implementation(bool bPlayerDesignated) override;
 	virtual void SaveCollectible_Implementation(bool bSaveToDisk) override;

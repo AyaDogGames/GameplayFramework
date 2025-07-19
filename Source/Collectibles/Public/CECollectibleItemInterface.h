@@ -48,7 +48,7 @@ public:
 	FCECollectibleDataDef GetDataRef() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Collectible")
-	FCECoinCoreDataRef GetTemplateDataRef() const;
+	FCECollectibleTemplateBaseRef GetTemplateDataRef() const;
 	
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Collectible")
 	void SetCollectibleData(UCECollectibleData* Data);

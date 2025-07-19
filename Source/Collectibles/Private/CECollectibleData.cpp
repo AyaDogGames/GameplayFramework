@@ -51,14 +51,25 @@ void UCECollectibleData::SetupViewModel()
 
 	FGameplayTagContainer AllSpecialTags;
 	AllSpecialTags.AppendTags(CollectibleDataRef.SpecialTags);
-	AllSpecialTags.AppendTags(CoinCoreDataRef.SpecialTags);
-	CollectibleViewModel->SetSpecialTags(AllSpecialTags);
 
-	// Copy data from CoinCoreDataRef
-	CollectibleViewModel->SetSubtype(CoinCoreDataRef.Subtype);
-	CollectibleViewModel->SetYear(CoinCoreDataRef.Year);
-	CollectibleViewModel->SetEdition(CoinCoreDataRef.Edition.ToString());
-	CollectibleViewModel->SetIssuer(CoinCoreDataRef.Issuer.ToString());
+	if (CoreTypeTag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("Collectibles.Core.Coin"))))
+	{
+		// Copy data from Coin Template 
+		AllSpecialTags.AppendTags(CoinTemplateData.SpecialTags);
+		CollectibleViewModel->SetSubtype(CoinTemplateData.Subtype);
+		CollectibleViewModel->SetYear(CoinTemplateData.Year);
+		CollectibleViewModel->SetEdition(CoinTemplateData.Edition.ToString());
+		CollectibleViewModel->SetIssuer(CoinTemplateData.Issuer.ToString());
+	} else if (CoreTypeTag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("Collectibles.Core.Card"))))
+	{
+		// Copy data from Card Template 
+		AllSpecialTags.AppendTags(CardTemplateData.SpecialTags);
+		CollectibleViewModel->SetSubtype(CardTemplateData.Subtype);
+		CollectibleViewModel->SetYear(CardTemplateData.Year);
+		CollectibleViewModel->SetEdition(CardTemplateData.Edition.ToString());
+		CollectibleViewModel->SetIssuer(CardTemplateData.Issuer.ToString());
+	}
+	CollectibleViewModel->SetSpecialTags(AllSpecialTags);
 
 	// Copy data from AppraisalData
 	if (AppraisalData.IsAppraisalValid())
@@ -69,4 +80,18 @@ void UCECollectibleData::SetupViewModel()
 		CollectibleViewModel->SetAppraisedValue(AppraisalData.AppraisedValue);
 	}
 }
+
+UTexture2D* UCECollectibleData::GetIcon() const
+{
+	if (CoreTypeTag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("Collectibles.Core.Coin"))))
+	{
+		return CoinTemplateData.Image.LoadSynchronous();
+	}
+	else if (CoreTypeTag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("Collectibles.Core.Card"))))
+	{
+		return CardTemplateData.Image.LoadSynchronous();
+	}
+	return nullptr;
+}
+
 

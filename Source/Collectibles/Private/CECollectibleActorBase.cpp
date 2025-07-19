@@ -8,7 +8,6 @@
 #include "DaPlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "UI/DaCommonUIExtensions.h"
-#include "CommonActivatableWidget.h"
 
 #define LOCTEXT_NAMESPACE "CollectibleItems"
 
@@ -59,9 +58,9 @@ USlateBrushAsset* ACECollectibleActorBase::GetItemBrush_Implementation() const
 
 UTexture2D* ACECollectibleActorBase::GetItemIcon_Implementation() const
 {
-	if (CollectibleData && CollectibleData->CoinCoreDataRef.Image.IsValid())
+	if (CollectibleData)
 	{
-		return CollectibleData->CoinCoreDataRef.Image.LoadSynchronous();
+		return CollectibleData->GetIcon();
 	}
 	return nullptr;
 }
@@ -69,11 +68,6 @@ UTexture2D* ACECollectibleActorBase::GetItemIcon_Implementation() const
 FCECollectibleDataDef ACECollectibleActorBase::GetDataRef_Implementation() const
 {
 	return CollectibleData ? CollectibleData->CollectibleDataRef : FCECollectibleDataDef();
-}
-
-FCECoinCoreDataRef ACECollectibleActorBase::GetTemplateDataRef_Implementation() const
-{
-	return CollectibleData ? CollectibleData->CoinCoreDataRef : FCECoinCoreDataRef();
 }
 
 void ACECollectibleActorBase::SetCollectibleData_Implementation(UCECollectibleData* Data)
@@ -131,9 +125,9 @@ int32 ACECollectibleActorBase::GetItemTags_Implementation(FGameplayTagContainer&
 
 UTexture2D* ACECollectibleActorBase::GetItemThumbnail_Implementation() const
 {
-	if (CollectibleData && CollectibleData->CoinCoreDataRef.Image.IsValid())
+	if (CollectibleData)
 	{
-		return CollectibleData->CoinCoreDataRef.Image.LoadSynchronous();
+		return CollectibleData->GetIcon();
 	}
 	return nullptr;
 }
