@@ -10,7 +10,6 @@
 #include "Inventory/DaInventoryItemInterface.h"
 #include "DaItemActor.generated.h"
 
-struct FDaInventoryItemData;
 class UDaAbilitySystemComponent;
 class UDaAbilitySet;
 class USphereComponent;
@@ -30,19 +29,14 @@ public:
 	virtual void HighlightActor_Implementation() override;
 	virtual void UnHighlightActor_Implementation() override;
 
-	// IAbilitySystemInterface 
+	// IAbilitySystemInterface
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
 	// IDaInventoryItemInterface
-	virtual FName GetItemName_Implementation() const override { return Name; }
-	virtual FName GetItemDescription_Implementation() const override { return Description; }
-	virtual int32 GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const override;
-	virtual UMaterialInterface* GetRenderTargetMaterial_Implementation() const override { return RenderTargetMaterial; }
-	virtual UDaAbilitySet* GetAbilitySet_Implementation() const override { return OwnedAbilitySet; }
-	virtual UStaticMeshComponent* GetMeshComponent_Implementation() const override { return MeshComp; }
-	virtual void AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor = true) override; 
-	
-	static ADaItemActor* CreateFromInventoryItem(const FDaInventoryItemData& InventoryData);
+	virtual FPrimaryAssetId GetItemDefinitionID_Implementation() const override { return ItemDefinitionID; }
+	virtual int32 GetStackCount_Implementation() const override { return 1; }
+	virtual void AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor = true) override;
+
 	void GrantSetToActor(UDaAbilitySystemComponent* ReceivingASC);
 
 protected:
@@ -52,12 +46,14 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category="Components")
 	TObjectPtr<UStaticMeshComponent> MeshComp;
-	
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UDaAbilitySystemComponent> AbilitySystemComponent;
 
-	// Begin IDaInventoryItemInterface Support
-	
+	// The item definition this actor represents in the inventory system
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Inventory")
+	FPrimaryAssetId ItemDefinitionID;
+
 	UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "InventoryItems")
 	FName Name;
 
@@ -67,14 +63,9 @@ protected:
 	UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "InventoryItems")
 	FGameplayTagContainer TypeTags;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InventoryItems|Icon")
-	TObjectPtr<UMaterialInterface> RenderTargetMaterial;
-
 	UPROPERTY(EditDefaultsOnly, Category="InventoryItems")
 	TObjectPtr<UDaAbilitySet> OwnedAbilitySet;
 
-	// END IDaInventoryItemInterface Support
-	
 	UPROPERTY(BlueprintReadOnly, Category="InventoryItems")
 	bool bHighlighted = false;
 
