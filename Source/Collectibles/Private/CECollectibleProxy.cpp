@@ -4,6 +4,7 @@
 #include "CECollectibleProxy.h"
 
 #include "CECollectibleData.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 
 

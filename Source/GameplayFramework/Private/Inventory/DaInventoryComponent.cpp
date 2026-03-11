@@ -329,18 +329,8 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 	if (!Def->AbilitySetToGrant.IsNull())
 	{
 		const FSoftObjectPath& AssetPath = Def->AbilitySetToGrant.ToSoftObjectPath();
-		UDaAbilitySet* LoadedSet = Def->AbilitySetToGrant.Get();
-		if (LoadedSet)
-		{
-			NewEntry.AbilitySetID = LoadedSet->GetPrimaryAssetId();
-		}
-		else
-		{
-			// Derive PrimaryAssetId from the soft object path
-			// PrimaryAssetType is "DaAbilitySet", PrimaryAssetName is the asset name
-			FString AssetName = FPackageName::ObjectPathToObjectName(AssetPath.GetAssetName());
-			NewEntry.AbilitySetID = FPrimaryAssetId(FPrimaryAssetType(TEXT("DaAbilitySet")), FName(*AssetName));
-		}
+		FString AssetName = FPackageName::ObjectPathToObjectName(AssetPath.GetAssetName());
+		NewEntry.AbilitySetID = FPrimaryAssetId(FPrimaryAssetType(TEXT("AbilitySetData")), FName(*AssetName));
 	}
 
 	InventoryList.AddEntry(NewEntry);

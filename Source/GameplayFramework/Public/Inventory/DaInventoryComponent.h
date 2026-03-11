@@ -25,7 +25,7 @@ public:
 
 	/** Main entry point for adding an item. Routes to server if called on client. */
 	UFUNCTION(BlueprintCallable, Category="Inventory")
-	bool AddItem(FPrimaryAssetId ItemDefinitionID, int32 StackCount = 1, int32 SlotHint = INDEX_NONE);
+	bool AddItem(FPrimaryAssetId ItemDefinitionID, int32 StackCount = 1, int32 SlotHint = -1);
 
 	/** Remove item at SlotIndex. Count=0 removes entire stack. Routes to server if called on client. */
 	UFUNCTION(BlueprintCallable, Category="Inventory")

@@ -5,6 +5,7 @@
 #include "CoreGameplayTags.h"
 #include "DaCharacter.h"
 #include "DaInspectableComponent.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "UI/DaCommonUIExtensions.h"
 

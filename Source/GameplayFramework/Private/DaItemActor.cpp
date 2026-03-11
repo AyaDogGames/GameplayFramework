@@ -7,6 +7,7 @@
 #include "AbilitySystem/DaAbilitySet.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
 #include "Components/SphereComponent.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "Net/UnrealNetwork.h"
 

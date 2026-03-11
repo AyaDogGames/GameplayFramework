@@ -6,6 +6,7 @@
 #include "DaInspectableComponent.h"
 #include "GameplayFramework.h"
 #include "Components/SphereComponent.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 
 #define LOCTEXT_NAMESPACE "InspectableItems"
