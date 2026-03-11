@@ -34,12 +34,8 @@ public:
 	virtual FText GetInteractText_Implementation(APawn* InstigatorPawn) override;
 
 	// IDaInventoryItemInterface
-	virtual FName GetItemName_Implementation() const override { return Name; }
-	virtual FName GetItemDescription_Implementation() const override { return Description; }
-	virtual int32 GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const override;
-	virtual UMaterialInterface* GetRenderTargetMaterial_Implementation() const override { return RenderTargetMaterial; }
-	virtual UDaAbilitySet* GetAbilitySet_Implementation() const override { return nullptr; }
-	virtual UStaticMeshComponent* GetMeshComponent_Implementation() const override { return PreviewMeshComponent; }
+	virtual FPrimaryAssetId GetItemDefinitionID_Implementation() const override { return ItemDefinitionID; }
+	virtual int32 GetStackCount_Implementation() const override { return 1; }
 	virtual void AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor = true) override;
 	
 protected:
@@ -71,10 +67,11 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
 	bool bCanBeAddedToInventory;
-	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-	FGameplayTagContainer TypeTags;
+
+	// The item definition this inspectable represents in the inventory system
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Inventory")
+	FPrimaryAssetId ItemDefinitionID;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-	TObjectPtr<UMaterialInterface> RenderTargetMaterial;
+	FGameplayTagContainer TypeTags;
 };

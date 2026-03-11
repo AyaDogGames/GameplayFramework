@@ -34,8 +34,12 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Collectible")
 	UStaticMeshComponent* GetPhysicsMesh();
-	
+
 protected:
+
+	// The item definition this collectible represents in the inventory system
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Inventory")
+	FPrimaryAssetId ItemDefinitionID;
 
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category="Components")
 	TObjectPtr<USceneComponent> RootSceneComp;
@@ -78,13 +82,8 @@ protected:
 	// ICECollectibleItemInterface End
 
 	// IDaInventoryItemInterface Begin
-	virtual FName GetItemName_Implementation() const override;
-	virtual FName GetItemDescription_Implementation() const override;
-	virtual int32 GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const override;
-	virtual UTexture2D* GetItemThumbnail_Implementation() const override;
-	virtual UMaterialInterface* GetRenderTargetMaterial_Implementation() const override;
-	virtual UStaticMeshComponent* GetMeshComponent_Implementation() const override;
-	virtual UDaAbilitySet* GetAbilitySet_Implementation() const override;
+	virtual FPrimaryAssetId GetItemDefinitionID_Implementation() const override;
+	virtual int32 GetStackCount_Implementation() const override { return 1; }
 	virtual void AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor) override;
 	// IDaInventoryItemInterface End
 

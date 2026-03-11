@@ -20,14 +20,15 @@ public:
 	static UCECollectibleProxy* CreateCollectibleProxyFromDataRef(const FCECollectibleDataDef* DataRef, const TSubclassOf<AActor>& ClassToSpawn);
 
 	// IDaInventoryItemInterface
-	virtual FName GetItemName_Implementation() const override { return CollectibleDataRef.CollectibleName; }
-	virtual UTexture2D* GetItemThumbnail_Implementation() const override { return Thumbnail; }
-	virtual FName GetItemDescription_Implementation() const override { return CollectibleDataRef.CollectibleName; }
-	virtual int32 GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const override;
-	virtual void AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor = true) override;	
+	virtual FPrimaryAssetId GetItemDefinitionID_Implementation() const override { return ItemDefinitionID; }
+	virtual int32 GetStackCount_Implementation() const override { return 1; }
+	virtual void AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor = true) override;
 
 	// ICECollectibleItemInterface
 	virtual FCECollectibleDataDef GetDataRef_Implementation() const override { return CollectibleDataRef; }
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Inventory")
+	FPrimaryAssetId ItemDefinitionID;
 
 	UPROPERTY()
 	FCECollectibleDataDef CollectibleDataRef;
