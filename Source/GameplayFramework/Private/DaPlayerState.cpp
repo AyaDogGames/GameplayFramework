@@ -134,6 +134,11 @@ void ADaPlayerState::LoadPlayerState_Implementation(UDaSaveGame* SaveObject)
 		{
 			LOG("Could not find SaveGame data for player id '%i'.", GetPlayerId());
 		}
+
+		if (InventoryComp && FoundData)
+		{
+			InventoryComp->LoadInventory(FoundData->SavedInventory);
+		}
 	}
 }
 
@@ -158,6 +163,11 @@ void ADaPlayerState::SavePlayerState_Implementation(UDaSaveGame* SaveObject)
 			SaveData.bResumeAtTransform = true;
 		}
 		
+		if (InventoryComp)
+		{
+			SaveData.SavedInventory = InventoryComp->SaveInventory();
+		}
+
 		SaveObject->SavedPlayers.Add(SaveData);
 	}
 }
