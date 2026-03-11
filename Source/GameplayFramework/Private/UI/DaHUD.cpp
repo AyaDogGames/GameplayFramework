@@ -5,7 +5,6 @@
 
 #include "CoreGameplayTags.h"
 #include "GameplayFramework.h"
-#include "Inventory/DaInventoryWidgetController.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/DaOverlayWidgetController.h"
 #include "UI/DaStatMenuWidgetController.h"
@@ -38,15 +37,6 @@ UDaStatMenuWidgetController* ADaHUD::GetStatMenuWidgetController(const FWidgetCo
 		StatMenuWidgetController = Cast<UDaStatMenuWidgetController>(GetWidgetController(StatMenuWidgetControllerClass, WCParams));
 	}
 	return StatMenuWidgetController;
-}
-
-UDaInventoryWidgetController* ADaHUD::GetInventoryWidgetController(const FWidgetControllerParams& WCParams)
-{
-	if (InventoryWidgetController == nullptr)
-	{
-		InventoryWidgetController = Cast<UDaInventoryWidgetController>(GetWidgetController(InventoryWidgetControllerClass, WCParams));
-	}
-	return InventoryWidgetController;
 }
 
 void ADaHUD::InitRootLayout(APlayerController* PC)

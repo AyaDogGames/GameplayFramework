@@ -10,8 +10,6 @@
 #include "Blueprint/UserWidget.h"
 #include "DaInputComponent.h"
 #include "DaPlayerState.h"
-#include "Inventory/DaInventoryUIWidget.h"
-#include "Inventory/DaInventoryWidgetController.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/DaHUD.h"
 #include "UI/DaUserWidgetBase.h"
