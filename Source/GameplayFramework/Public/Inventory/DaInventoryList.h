@@ -61,9 +61,13 @@ struct GAMEPLAYFRAMEWORK_API FDaInventoryList : public FFastArraySerializer
 	/** Number of entries currently in the list. */
 	int32 GetCount() const { return Entries.Num(); }
 
+	/** Return a read-only reference to the full entries array. */
+	const TArray<FDaInventoryEntry>& GetEntries() const { return Entries; }
+
 private:
 
 	friend FDaInventoryEntry;
+	friend UDaInventoryComponent;
 
 	// The replicated item array
 	UPROPERTY()

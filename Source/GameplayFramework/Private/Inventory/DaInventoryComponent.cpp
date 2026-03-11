@@ -1,16 +1,13 @@
 // Copyright Dream Awake Solutions LLC
 
-
 #include "Inventory/DaInventoryComponent.h"
-#include "Inventory/DaInventoryItemBase.h"
 
-#include "CoreGameplayTags.h"
+#include "AbilitySystem/DaAbilitySet.h"
 #include "GameplayFramework.h"
-#include "GameplayTagContainer.h"
-#include "Inventory/DaInventoryBlueprintLibrary.h"
-#include "Inventory/DaStackableInventoryItem.h"
+#include "Engine/AssetManager.h"
+#include "Inventory/DaInventoryList.h"
+#include "Inventory/DaItemDefinition.h"
 #include "Net/UnrealNetwork.h"
-
 
 UDaInventoryComponent::UDaInventoryComponent()
 {
@@ -22,344 +19,349 @@ void UDaInventoryComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	InitializeEmptySlots();
+	InventoryList.OwnerComponent = this;
 }
 
 void UDaInventoryComponent::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(UDaInventoryComponent, Items);
-	DOREPLIFETIME(UDaInventoryComponent, MaxSize);
-	DOREPLIFETIME(UDaInventoryComponent, FilledSlots);
+	DOREPLIFETIME(UDaInventoryComponent, InventoryList);
+	DOREPLIFETIME(UDaInventoryComponent, MaxSlots);
 	DOREPLIFETIME(UDaInventoryComponent, InventoryTags);
-	
 }
 
-void UDaInventoryComponent::InitializeEmptySlots()
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::AddItem(FPrimaryAssetId ItemDefinitionID, int32 StackCount, int32 SlotHint)
 {
-	Items.SetNum(MaxSize); // Ensure array is of correct size
-
-	for (int32 i = 0; i < MaxSize; ++i)
-	{
-		if (!Items[i])
-		{
-			UDaInventoryItemBase* EmptySlot = NewObject<UDaInventoryItemBase>(this);
-			EmptySlot->bIsEmptySlot = true;
-			Items[i] = EmptySlot;
-		}
-	}
-
 	if (GetOwnerRole() == ROLE_Authority)
 	{
-		OnRep_Items(); // Notify clients
+		return Internal_AddItem(ItemDefinitionID, StackCount, SlotHint);
 	}
+
+	// Client: route to server RPC (optimistic return)
+	Server_AddItem(ItemDefinitionID, StackCount, SlotHint);
+	return true;
 }
 
-TArray<int32> UDaInventoryComponent::GetSlotsWithDuplicates(FGameplayTagContainer Tags) const
+bool UDaInventoryComponent::RemoveItem(int32 SlotIndex, int32 Count)
 {
-	FGameplayTag TagToCheck = GetSpecificTag(Tags, CoreGameplayTags::InventoryItem_Type);
-
-	TArray<int32> DuplicateSlotIndexes;
-	if (TagToCheck.IsValid())
+	if (GetOwnerRole() == ROLE_Authority)
 	{
-		int32 CurrentSlotIndex = 0;
-		for (UDaInventoryItemBase* ExistingItem : Items)
+		const FDaInventoryEntry* Entry = InventoryList.FindBySlot(SlotIndex);
+		if (!Entry)
 		{
-			if (ExistingItem->GetTags().HasTagExact(TagToCheck))
-			{
-				DuplicateSlotIndexes.Add(CurrentSlotIndex);
-			}
-			CurrentSlotIndex++;
+			return false;
 		}
-	}
-	return DuplicateSlotIndexes;
-}
 
-
-bool UDaInventoryComponent::IsItemValid(FGameplayTagContainer Tags) const
-{
-	// check for duplicates
-	bool bDuplicateExists = !GetSlotsWithDuplicates(Tags).IsEmpty();
-	bool bAllowedDuplicate = DuplicationPolicy == EInventoryItemDuplicationPolicy::AllowDuplicates;
-	
-	// Add if item meets insertion and duplication policies
-	if (InsertionPolicy == EInventoryItemInsertionPolicy::AddAlways)
-	{
-		if (bAllowedDuplicate || !bDuplicateExists)
+		if (Count == 0 || Count >= Entry->StackCount)
 		{
-			return true;
+			InventoryList.RemoveEntry(SlotIndex);
 		}
-	}
-	else if (InsertionPolicy == EInventoryItemInsertionPolicy::AddOnlyIfTypeTagMatches)
-	{
-		// Check if this inventory supports this type of item
-		FGameplayTag InventoryTypeTag = GetSpecificTag(InventoryTags, CoreGameplayTags::InventoryItem_Type);
-		if (InventoryTypeTag.IsValid() && Tags.HasTag(InventoryTypeTag))
+		else
 		{
-			if (bAllowedDuplicate || !bDuplicateExists)
-			{
-				return true;
-			}
+			FDaInventoryEntry Updated = *Entry;
+			Updated.StackCount -= Count;
+			InventoryList.UpdateEntry(SlotIndex, Updated);
 		}
+		return true;
 	}
 
-	LOG_WARNING("Item failed validation due when adding");
-	
-	return false;
+	// Client: route to server RPC
+	Server_RemoveItem(SlotIndex, Count);
+	return true;
 }
 
-int32 UDaInventoryComponent::FindSlot(FGameplayTagContainer Tags) const
+bool UDaInventoryComponent::MoveItem(int32 FromSlot, int32 ToSlot)
 {
-	int32 SlotIndex = INDEX_NONE;
-
-	// Find the first slot where we can stack a duplicate
-	TArray<int32> DuplicateSlotIndexes = GetSlotsWithDuplicates(Tags);
-	for (int32 DuplicateSlotIndex: DuplicateSlotIndexes)
+	if (GetOwnerRole() == ROLE_Authority)
 	{
-		UDaInventoryItemBase* DuplicateItem = Items[DuplicateSlotIndex];
-		if (UDaStackableInventoryItem* StackableItem = Cast<UDaStackableInventoryItem>(DuplicateItem))
+		const FDaInventoryEntry* FromEntry = InventoryList.FindBySlot(FromSlot);
+		if (!FromEntry)
 		{
-			// Check if this Stackable Item can support more on its stack
-			if (StackableItem->Quantity < StackableItem->MaxStackSize)
-			{
-				// We found the first stack that meets our criteria
-				SlotIndex = DuplicateSlotIndex;
-				break;
-			}
+			return false;
 		}
-	}
 
-	// We didnt find a duplicate to stack with, check and see if there is any room in this inventory still
-	if (SlotIndex == INDEX_NONE && !IsComplete())
-	{
-		SlotIndex = GetSize();
-	}
-	
-	return SlotIndex;
-}
-
-bool UDaInventoryComponent::AddItem(const UObject* SourceObject, int32 SlotIndex)
-{
-	if (!IsValid(SourceObject)) return false;
-
-	// Determine the required subclass
-	TSubclassOf<UDaInventoryItemBase> RequiredClass = UDaInventoryBlueprintLibrary::GetInventoryItemClass(SourceObject);
-	if (RequiredClass)
-	{
-		UDaInventoryItemBase* NewItem = UDaInventoryBlueprintLibrary::CreateInventoryItem(SourceObject);
-		if (NewItem)
+		const FDaInventoryEntry* ToEntry = InventoryList.FindBySlot(ToSlot);
+		if (ToEntry)
 		{
-			if (SlotIndex == INDEX_NONE)
-			{
-				// We're being asked to find a place to add this.
-				SlotIndex = FindSlot(NewItem->GetTags());
-			}
-
-			if (IsItemValid(NewItem->GetTags()))
-			{
-				if (SlotIndex > INDEX_NONE && Items.IsValidIndex(SlotIndex))
-				{
-					UDaInventoryItemBase* CurrentItem = Items[SlotIndex];
-					if (CurrentItem)
-					{
-						// Check if the current item is not empty
-						if (!CurrentItem->bIsEmptySlot)
-						{
-							// Broadcast the old item's data before replacing it
-							FDaInventoryItemData OldData = CurrentItem->ToData();
-				
-							// Store old data to ensure proper rollback
-							if (GetOwnerRole() != ROLE_Authority)
-							{
-								PredictedItems.Add(SlotIndex, OldData);
-							}
-
-							// Stackableitems merge
-							if (CurrentItem->CanMergeWith(NewItem))
-							{
-								CurrentItem->MergeWith(NewItem);
-							}
-							else
-							{
-								// Removing data, possibly a swap
-							
-								// Inform listeners we're replacing the item if we didnt just merge
-								CurrentItem->OnInventoryItemRemoved.Broadcast(OldData);
-							}
-						}
-						else 
-						{
-							// Empty Slot
-						
-							// Determine the required subclass
-							if (RequiredClass && CurrentItem->GetClass() != RequiredClass)
-							{
-								// Replace the current item with a new instance of the correct subclass (if for example its a stackableItem or something else)
-								CurrentItem = NewItem;
-								Items[SlotIndex] = NewItem;
-							}
-						}
-						
-						// Now fill the current Item with slot data
-						CurrentItem->PopulateWithData(NewItem->ToData());
-						CurrentItem->bIsEmptySlot = false;
-						
-						// Sync changes for server authority
-						if (GetOwnerRole() != ROLE_Authority)
-						{
-							// Log item for rollback in case prediction fails
-							Server_AddItem(SourceObject, SlotIndex);
-						} else
-						{
-							FilledSlots++;
-						}
-
-						// broadcast our changes to the specific slot
-						NotifyInventoryChanged(SlotIndex);
-						return true;
-					}
-				}
-			}
+			// Swap: update both entries with swapped slot indices
+			FDaInventoryEntry UpdatedFrom = *FromEntry;
+			FDaInventoryEntry UpdatedTo = *ToEntry;
+			UpdatedFrom.SlotIndex = ToSlot;
+			UpdatedTo.SlotIndex = FromSlot;
+			InventoryList.UpdateEntry(FromSlot, UpdatedTo);
+			InventoryList.UpdateEntry(ToSlot, UpdatedFrom);
 		}
-	}
-	return false;
-}
-
-void UDaInventoryComponent::Server_AddItem_Implementation(const UObject* SourceObject, int32 SlotIndex)
-{
-	if (AddItem(SourceObject, SlotIndex))
-	{
-		// Remove from pending if valid
-		// Remove the rollback data
-		PredictedItems.Remove(SlotIndex);
-	}
-	else
-	{
-		// Rollback prediction on client if invalid
-		if (GetOwnerRole() == ROLE_SimulatedProxy)
+		else
 		{
-			RollbackPredictedItem(SlotIndex);
+			// Move: just update the slot index
+			FDaInventoryEntry Updated = *FromEntry;
+			Updated.SlotIndex = ToSlot;
+
+			// Remove from old slot, add to new
+			InventoryList.RemoveEntry(FromSlot);
+			InventoryList.AddEntry(Updated);
 		}
+		return true;
 	}
+
+	// Client: route to server RPC
+	Server_MoveItem(FromSlot, ToSlot);
+	return true;
 }
 
-void UDaInventoryComponent::RollbackPredictedItem(int32 SlotIndex)
+TArray<FDaInventoryEntry> UDaInventoryComponent::GetAllEntries() const
 {
-	if (SlotIndex > INDEX_NONE && Items.IsValidIndex(SlotIndex))
-	{
-		UDaInventoryItemBase* CurrentItem = Items[SlotIndex];
-		FDaInventoryItemData* OriginalData = PredictedItems.Find(SlotIndex);
-		if (OriginalData && OriginalData->ItemClass)
-		{
-			TSubclassOf<UDaInventoryItemBase> RequiredClass = OriginalData->ItemClass;
-			if (CurrentItem->GetClass() != RequiredClass)
-			{
-				// Replace the current item with a new instance of the correct subclass
-				CurrentItem = NewObject<UDaInventoryItemBase>(this, RequiredClass);
-				Items[SlotIndex] = CurrentItem;
-			}
-
-			CurrentItem->PopulateWithData(*OriginalData);
-
-			// Remove the rollback data
-			PredictedItems.Remove(SlotIndex);
-
-			// update listeners
-			NotifyInventoryChanged(SlotIndex);
-		}
-	}
+	return InventoryList.GetEntries();
 }
 
-
-bool UDaInventoryComponent::RemoveItem(int32 SlotIndex)
+const FDaInventoryEntry* UDaInventoryComponent::GetEntryAtSlot(int32 SlotIndex) const
 {
-	if (SlotIndex > INDEX_NONE && Items.IsValidIndex(SlotIndex))
-	{
-		UDaInventoryItemBase* CurrentItem = Items[SlotIndex];
-		if (CurrentItem)
-		{
-			if (!CurrentItem->bIsEmptySlot)
-			{
-				// Broadcast the old item's data before replacing it
-				FDaInventoryItemData OldData = CurrentItem->ToData();
-				CurrentItem->ClearData();
-				
-				// notify listeners of the item we've removed
-				CurrentItem->OnInventoryItemRemoved.Broadcast(OldData);
-				
-				// Store old data to ensure proper rollback
-				if (GetOwnerRole() != ROLE_Authority)
-				{
-					PredictedItems.Add(SlotIndex, OldData);
-					Server_RemoveItem(SlotIndex);
-				} else
-				{
-					FilledSlots--;
-				}
-
-				// broadcast our changes to the specific slot
-				NotifyInventoryChanged(SlotIndex);
-				
-				return true;
-			}
-		}
-	}
-	return false;
+	return InventoryList.FindBySlot(SlotIndex);
 }
 
-void UDaInventoryComponent::Server_RemoveItem_Implementation(int32 SlotIndex)
+bool UDaInventoryComponent::IsSlotEmpty(int32 SlotIndex) const
 {
-	if (RemoveItem(SlotIndex))
+	return InventoryList.FindBySlot(SlotIndex) == nullptr;
+}
+
+int32 UDaInventoryComponent::GetFilledSlotCount() const
+{
+	return InventoryList.GetCount();
+}
+
+int32 UDaInventoryComponent::GetMaxSlots() const
+{
+	return MaxSlots;
+}
+
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
+
+TArray<FDaInventoryEntry> UDaInventoryComponent::SaveInventory() const
+{
+	return InventoryList.GetEntries();
+}
+
+void UDaInventoryComponent::LoadInventory(const TArray<FDaInventoryEntry>& SavedEntries)
+{
+	if (GetOwnerRole() != ROLE_Authority)
 	{
-		// Remove from pending if valid
-		PredictedItems.Remove(SlotIndex);
+		LOG_WARNING("LoadInventory called on non-authority. Ignoring.");
+		return;
 	}
-	else
+
+	// Clear existing entries
+	InventoryList.MarkArrayDirty();
+	InventoryList.Entries.Empty();
+
+	// Re-add each saved entry
+	for (const FDaInventoryEntry& Entry : SavedEntries)
 	{
-		// Rollback prediction on client if invalid
-		if (GetOwnerRole() == ROLE_SimulatedProxy)
-		{
-			RollbackPredictedItem(SlotIndex);
-		}
+		InventoryList.AddEntry(Entry);
 	}
 }
 
-void UDaInventoryComponent::OnRep_Items()
-{
-	NotifyInventoryChanged(INDEX_NONE);
-}
-
-void UDaInventoryComponent::NotifyInventoryChanged(int32 SlotIndex)
-{
-	if (SlotIndex == INDEX_NONE)
-		OnInventoryChanged.Broadcast(Items, SlotIndex);
-	else
-	{
-		UDaInventoryItemBase* CurrentItem = Items[SlotIndex];
-		CurrentItem->OnInventoryItemUpdated.Broadcast(CurrentItem);
-	}
-}
+// ---------------------------------------------------------------------------
+// Static helpers
+// ---------------------------------------------------------------------------
 
 UDaInventoryComponent* UDaInventoryComponent::GetInventoryFromActor(AActor* Actor)
 {
-	if (!Actor) return nullptr;
+	if (!Actor)
+	{
+		return nullptr;
+	}
 	return Actor->FindComponentByClass<UDaInventoryComponent>();
 }
 
-TArray<UDaInventoryItemBase*> UDaInventoryComponent::QueryByTag(FGameplayTagQuery Query) const
+// ---------------------------------------------------------------------------
+// Server RPCs
+// ---------------------------------------------------------------------------
+
+void UDaInventoryComponent::Server_AddItem_Implementation(FPrimaryAssetId ItemDefinitionID, int32 StackCount, int32 SlotHint)
 {
-	TArray<UDaInventoryItemBase*> FilteredItems;
-	for (UDaInventoryItemBase* Item : Items)
+	if (!Internal_AddItem(ItemDefinitionID, StackCount, SlotHint))
 	{
-		if (Query.Matches(Item->GetTags()))
-		{
-			FilteredItems.Add(Item);
-		}
+		LOG_WARNING("Server_AddItem failed for asset: %s", *ItemDefinitionID.ToString());
 	}
-	return FilteredItems;
 }
 
+void UDaInventoryComponent::Server_RemoveItem_Implementation(int32 SlotIndex, int32 Count)
+{
+	const FDaInventoryEntry* Entry = InventoryList.FindBySlot(SlotIndex);
+	if (!Entry)
+	{
+		LOG_WARNING("Server_RemoveItem: no entry at slot %d", SlotIndex);
+		return;
+	}
 
+	if (Count == 0 || Count >= Entry->StackCount)
+	{
+		InventoryList.RemoveEntry(SlotIndex);
+	}
+	else
+	{
+		FDaInventoryEntry Updated = *Entry;
+		Updated.StackCount -= Count;
+		InventoryList.UpdateEntry(SlotIndex, Updated);
+	}
+}
 
+void UDaInventoryComponent::Server_MoveItem_Implementation(int32 FromSlot, int32 ToSlot)
+{
+	const FDaInventoryEntry* FromEntry = InventoryList.FindBySlot(FromSlot);
+	if (!FromEntry)
+	{
+		LOG_WARNING("Server_MoveItem: no entry at from-slot %d", FromSlot);
+		return;
+	}
 
+	const FDaInventoryEntry* ToEntry = InventoryList.FindBySlot(ToSlot);
+	if (ToEntry)
+	{
+		// Swap
+		FDaInventoryEntry UpdatedFrom = *FromEntry;
+		FDaInventoryEntry UpdatedTo = *ToEntry;
+		UpdatedFrom.SlotIndex = ToSlot;
+		UpdatedTo.SlotIndex = FromSlot;
+		InventoryList.UpdateEntry(FromSlot, UpdatedTo);
+		InventoryList.UpdateEntry(ToSlot, UpdatedFrom);
+	}
+	else
+	{
+		// Move
+		FDaInventoryEntry Updated = *FromEntry;
+		Updated.SlotIndex = ToSlot;
+		InventoryList.RemoveEntry(FromSlot);
+		InventoryList.AddEntry(Updated);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Internal add logic (server-only)
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, int32 StackCount, int32 SlotHint)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return false;
+	}
+
+	// Load the item definition
+	UDaItemDefinition* Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(ItemDefinitionID));
+	if (!Def)
+	{
+		// Try synchronous load
+		UAssetManager::Get().LoadPrimaryAsset(ItemDefinitionID);
+		Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(ItemDefinitionID));
+
+		if (!Def)
+		{
+			LOG_WARNING("Internal_AddItem: failed to load item definition %s", *ItemDefinitionID.ToString());
+			return false;
+		}
+	}
+
+	// Check if stackable and try to stack with existing entry
+	if (Def->MaxStackCount > 1)
+	{
+		// Build a temporary entry to test stacking compatibility
+		FDaInventoryEntry StackProbe;
+		StackProbe.ItemDefinitionID = ItemDefinitionID;
+		StackProbe.MaxStackCount = Def->MaxStackCount;
+		StackProbe.StackCount = 1; // Needs at least 1 for CanStackWith
+
+		int32 StackSlot = InventoryList.FindStackableSlot(StackProbe);
+		if (StackSlot != INDEX_NONE)
+		{
+			FDaInventoryEntry* Existing = InventoryList.FindBySlotMutable(StackSlot);
+			if (Existing)
+			{
+				FDaInventoryEntry Updated = *Existing;
+				Updated.StackCount = FMath::Min(Updated.StackCount + StackCount, Updated.MaxStackCount);
+				InventoryList.UpdateEntry(StackSlot, Updated);
+				return true;
+			}
+		}
+	}
+
+	// Find an empty slot
+	int32 TargetSlot = INDEX_NONE;
+
+	// Prefer SlotHint if valid and empty
+	if (SlotHint != INDEX_NONE && SlotHint >= 0 && SlotHint < MaxSlots)
+	{
+		if (InventoryList.FindBySlot(SlotHint) == nullptr)
+		{
+			TargetSlot = SlotHint;
+		}
+	}
+
+	// Otherwise find first empty slot
+	if (TargetSlot == INDEX_NONE)
+	{
+		TargetSlot = InventoryList.FindFirstEmptySlot(MaxSlots);
+	}
+
+	if (TargetSlot == INDEX_NONE)
+	{
+		LOG_WARNING("Internal_AddItem: inventory full (MaxSlots=%d)", MaxSlots);
+		return false;
+	}
+
+	// Create new entry
+	FDaInventoryEntry NewEntry;
+	NewEntry.ItemID = FGuid::NewGuid();
+	NewEntry.ItemDefinitionID = ItemDefinitionID;
+	NewEntry.SlotIndex = TargetSlot;
+	NewEntry.StackCount = StackCount;
+	NewEntry.MaxStackCount = Def->MaxStackCount;
+	NewEntry.Tags = Def->ItemTags;
+
+	// Convert ability set soft pointer to FPrimaryAssetId if valid
+	if (!Def->AbilitySetToGrant.IsNull())
+	{
+		const FSoftObjectPath& AssetPath = Def->AbilitySetToGrant.ToSoftObjectPath();
+		UDaAbilitySet* LoadedSet = Def->AbilitySetToGrant.Get();
+		if (LoadedSet)
+		{
+			NewEntry.AbilitySetID = LoadedSet->GetPrimaryAssetId();
+		}
+		else
+		{
+			// Derive PrimaryAssetId from the soft object path
+			// PrimaryAssetType is "DaAbilitySet", PrimaryAssetName is the asset name
+			FString AssetName = FPackageName::ObjectPathToObjectName(AssetPath.GetAssetName());
+			NewEntry.AbilitySetID = FPrimaryAssetId(FPrimaryAssetType(TEXT("DaAbilitySet")), FName(*AssetName));
+		}
+	}
+
+	InventoryList.AddEntry(NewEntry);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Internal delegate broadcasts (called by FDaInventoryEntry FastArray callbacks)
+// ---------------------------------------------------------------------------
+
+void UDaInventoryComponent::OnEntryAddedInternal(const FDaInventoryEntry& Entry)
+{
+	OnEntryAdded.Broadcast(Entry, Entry.SlotIndex);
+}
+
+void UDaInventoryComponent::OnEntryRemovedInternal(const FDaInventoryEntry& Entry)
+{
+	OnEntryRemoved.Broadcast(Entry, Entry.SlotIndex);
+}
+
+void UDaInventoryComponent::OnEntryChangedInternal(const FDaInventoryEntry& Entry)
+{
+	OnEntryChanged.Broadcast(Entry, Entry.SlotIndex);
+}
