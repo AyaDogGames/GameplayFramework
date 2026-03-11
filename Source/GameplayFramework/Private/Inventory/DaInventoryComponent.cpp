@@ -49,6 +49,11 @@ bool UDaInventoryComponent::AddItem(FPrimaryAssetId ItemDefinitionID, int32 Stac
 
 bool UDaInventoryComponent::RemoveItem(int32 SlotIndex, int32 Count)
 {
+	if (Count < 0)
+	{
+		return false;
+	}
+
 	if (GetOwnerRole() == ROLE_Authority)
 	{
 		const FDaInventoryEntry* Entry = InventoryList.FindBySlot(SlotIndex);
@@ -77,6 +82,11 @@ bool UDaInventoryComponent::RemoveItem(int32 SlotIndex, int32 Count)
 
 bool UDaInventoryComponent::MoveItem(int32 FromSlot, int32 ToSlot)
 {
+	if (FromSlot < 0 || FromSlot >= MaxSlots || ToSlot < 0 || ToSlot >= MaxSlots || FromSlot == ToSlot)
+	{
+		return false;
+	}
+
 	if (GetOwnerRole() == ROLE_Authority)
 	{
 		const FDaInventoryEntry* FromEntry = InventoryList.FindBySlot(FromSlot);
@@ -98,13 +108,10 @@ bool UDaInventoryComponent::MoveItem(int32 FromSlot, int32 ToSlot)
 		}
 		else
 		{
-			// Move: just update the slot index
+			// Move: update slot index in-place to preserve FastArray identity (change delta, not remove/add)
 			FDaInventoryEntry Updated = *FromEntry;
 			Updated.SlotIndex = ToSlot;
-
-			// Remove from old slot, add to new
-			InventoryList.RemoveEntry(FromSlot);
-			InventoryList.AddEntry(Updated);
+			InventoryList.UpdateEntry(FromSlot, Updated);
 		}
 		return true;
 	}
@@ -194,6 +201,12 @@ void UDaInventoryComponent::Server_AddItem_Implementation(FPrimaryAssetId ItemDe
 
 void UDaInventoryComponent::Server_RemoveItem_Implementation(int32 SlotIndex, int32 Count)
 {
+	if (Count < 0)
+	{
+		LOG_WARNING("Server_RemoveItem: invalid Count %d", Count);
+		return;
+	}
+
 	const FDaInventoryEntry* Entry = InventoryList.FindBySlot(SlotIndex);
 	if (!Entry)
 	{
@@ -215,6 +228,12 @@ void UDaInventoryComponent::Server_RemoveItem_Implementation(int32 SlotIndex, in
 
 void UDaInventoryComponent::Server_MoveItem_Implementation(int32 FromSlot, int32 ToSlot)
 {
+	if (FromSlot < 0 || FromSlot >= MaxSlots || ToSlot < 0 || ToSlot >= MaxSlots || FromSlot == ToSlot)
+	{
+		LOG_WARNING("Server_MoveItem: invalid slot range From=%d To=%d (MaxSlots=%d)", FromSlot, ToSlot, MaxSlots);
+		return;
+	}
+
 	const FDaInventoryEntry* FromEntry = InventoryList.FindBySlot(FromSlot);
 	if (!FromEntry)
 	{
@@ -235,11 +254,10 @@ void UDaInventoryComponent::Server_MoveItem_Implementation(int32 FromSlot, int32
 	}
 	else
 	{
-		// Move
+		// Move in-place to preserve FastArray identity
 		FDaInventoryEntry Updated = *FromEntry;
 		Updated.SlotIndex = ToSlot;
-		InventoryList.RemoveEntry(FromSlot);
-		InventoryList.AddEntry(Updated);
+		InventoryList.UpdateEntry(FromSlot, Updated);
 	}
 }
 
@@ -254,13 +272,22 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 		return false;
 	}
 
-	// Load the item definition
+	if (StackCount <= 0)
+	{
+		LOG_WARNING("Internal_AddItem: invalid StackCount %d for item %s", StackCount, *ItemDefinitionID.ToString());
+		return false;
+	}
+
+	// Load the item definition (synchronous — definitions should be small data assets)
 	UDaItemDefinition* Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(ItemDefinitionID));
 	if (!Def)
 	{
-		// Try synchronous load
-		UAssetManager::Get().LoadPrimaryAsset(ItemDefinitionID);
-		Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(ItemDefinitionID));
+		// Try synchronous load via resolved asset path
+		FSoftObjectPath AssetPath = UAssetManager::Get().GetPrimaryAssetPath(ItemDefinitionID);
+		if (AssetPath.IsValid())
+		{
+			Def = Cast<UDaItemDefinition>(AssetPath.TryLoad());
+		}
 
 		if (!Def)
 		{
@@ -269,71 +296,99 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 		}
 	}
 
-	// Check if stackable and try to stack with existing entry
+	int32 Remaining = StackCount;
+
+	// Check if stackable and try to stack with existing entries
 	if (Def->MaxStackCount > 1)
 	{
 		// Build a temporary entry to test stacking compatibility
 		FDaInventoryEntry StackProbe;
 		StackProbe.ItemDefinitionID = ItemDefinitionID;
 		StackProbe.MaxStackCount = Def->MaxStackCount;
-		StackProbe.StackCount = 1; // Needs at least 1 for CanStackWith
+		StackProbe.StackCount = 1;
 
-		int32 StackSlot = InventoryList.FindStackableSlot(StackProbe);
-		if (StackSlot != INDEX_NONE)
+		// Keep stacking into existing slots until we run out of items or stackable slots
+		while (Remaining > 0)
 		{
-			FDaInventoryEntry* Existing = InventoryList.FindBySlotMutable(StackSlot);
-			if (Existing)
+			int32 StackSlot = InventoryList.FindStackableSlot(StackProbe);
+			if (StackSlot == INDEX_NONE)
 			{
-				FDaInventoryEntry Updated = *Existing;
-				Updated.StackCount = FMath::Min(Updated.StackCount + StackCount, Updated.MaxStackCount);
-				InventoryList.UpdateEntry(StackSlot, Updated);
-				return true;
+				break;
 			}
+
+			FDaInventoryEntry* Existing = InventoryList.FindBySlotMutable(StackSlot);
+			if (!Existing)
+			{
+				break;
+			}
+
+			const int32 AvailableSpace = Existing->MaxStackCount - Existing->StackCount;
+			const int32 ToStack = FMath::Min(AvailableSpace, Remaining);
+
+			FDaInventoryEntry Updated = *Existing;
+			Updated.StackCount += ToStack;
+			InventoryList.UpdateEntry(StackSlot, Updated);
+
+			Remaining -= ToStack;
 		}
-	}
 
-	// Find an empty slot
-	int32 TargetSlot = INDEX_NONE;
-
-	// Prefer SlotHint if valid and empty
-	if (SlotHint != INDEX_NONE && SlotHint >= 0 && SlotHint < MaxSlots)
-	{
-		if (InventoryList.FindBySlot(SlotHint) == nullptr)
+		if (Remaining <= 0)
 		{
-			TargetSlot = SlotHint;
+			return true;
 		}
 	}
 
-	// Otherwise find first empty slot
-	if (TargetSlot == INDEX_NONE)
+	// Create new entries for remaining items (may need multiple slots for large stack counts)
+	while (Remaining > 0)
 	{
-		TargetSlot = InventoryList.FindFirstEmptySlot(MaxSlots);
+		// Find an empty slot
+		int32 TargetSlot = INDEX_NONE;
+
+		// Prefer SlotHint if valid and empty (only for first new entry)
+		if (SlotHint >= 0 && SlotHint < MaxSlots)
+		{
+			if (InventoryList.FindBySlot(SlotHint) == nullptr)
+			{
+				TargetSlot = SlotHint;
+			}
+			SlotHint = INDEX_NONE; // Only use hint once
+		}
+
+		// Otherwise find first empty slot
+		if (TargetSlot == INDEX_NONE)
+		{
+			TargetSlot = InventoryList.FindFirstEmptySlot(MaxSlots);
+		}
+
+		if (TargetSlot == INDEX_NONE)
+		{
+			LOG_WARNING("Internal_AddItem: inventory full, %d items could not be added (MaxSlots=%d)", Remaining, MaxSlots);
+			return Remaining < StackCount; // Partial success if we added some
+		}
+
+		// Create new entry, clamped to max stack size
+		const int32 EntryCount = FMath::Min(Remaining, Def->MaxStackCount);
+
+		FDaInventoryEntry NewEntry;
+		NewEntry.ItemID = FGuid::NewGuid();
+		NewEntry.ItemDefinitionID = ItemDefinitionID;
+		NewEntry.SlotIndex = TargetSlot;
+		NewEntry.StackCount = EntryCount;
+		NewEntry.MaxStackCount = Def->MaxStackCount;
+		NewEntry.Tags = Def->ItemTags;
+
+		// Convert ability set soft pointer to FPrimaryAssetId if valid
+		if (!Def->AbilitySetToGrant.IsNull())
+		{
+			const FSoftObjectPath& AssetPath = Def->AbilitySetToGrant.ToSoftObjectPath();
+			FString AssetName = FPackageName::ObjectPathToObjectName(AssetPath.GetAssetName());
+			NewEntry.AbilitySetID = FPrimaryAssetId(FPrimaryAssetType(TEXT("AbilitySetData")), FName(*AssetName));
+		}
+
+		InventoryList.AddEntry(NewEntry);
+		Remaining -= EntryCount;
 	}
 
-	if (TargetSlot == INDEX_NONE)
-	{
-		LOG_WARNING("Internal_AddItem: inventory full (MaxSlots=%d)", MaxSlots);
-		return false;
-	}
-
-	// Create new entry
-	FDaInventoryEntry NewEntry;
-	NewEntry.ItemID = FGuid::NewGuid();
-	NewEntry.ItemDefinitionID = ItemDefinitionID;
-	NewEntry.SlotIndex = TargetSlot;
-	NewEntry.StackCount = StackCount;
-	NewEntry.MaxStackCount = Def->MaxStackCount;
-	NewEntry.Tags = Def->ItemTags;
-
-	// Convert ability set soft pointer to FPrimaryAssetId if valid
-	if (!Def->AbilitySetToGrant.IsNull())
-	{
-		const FSoftObjectPath& AssetPath = Def->AbilitySetToGrant.ToSoftObjectPath();
-		FString AssetName = FPackageName::ObjectPathToObjectName(AssetPath.GetAssetName());
-		NewEntry.AbilitySetID = FPrimaryAssetId(FPrimaryAssetType(TEXT("AbilitySetData")), FName(*AssetName));
-	}
-
-	InventoryList.AddEntry(NewEntry);
 	return true;
 }
 
