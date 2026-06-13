@@ -1,3 +1,12 @@
+> # ⚠️ STATUS: ASPIRATIONAL — NOT IMPLEMENTED
+> This document is a **design proposal**, not a description of shipped functionality.
+> **None of it exists in code.** There is **no `GameplayFrameworkEditor` module** (the plugin
+> declares only two Runtime modules, `GameplayFramework` and `Collectibles`, in
+> `GameplayFramework.uplugin`), and none of the classes named below
+> (`UDaProjectSetupWizard`, `EGameType`, `UDaCoreClassFactory`, the various wizards/factories/
+> validators, etc.) are present anywhere under `Source/`. Treat everything here as a future
+> wish-list for UE 5.7 editor tooling — do not cite it as an existing API.
+
 # GameplayFramework Editor Tooling Plan
 
 Based on analysis of the plugin structure and setup requirements, this document outlines a comprehensive editor tooling plan to automate game creation using the GameplayFramework plugin.
