@@ -13,6 +13,7 @@ class UDaPrimaryGameLayout;
 class UDaAbilitySystemComponent;
 class UDaStatMenuWidgetController;
 class UDaOverlayWidgetController;
+class UDaInventoryWidgetController;
 class UDaUserWidgetBase;
 struct FWidgetControllerParams;
 
@@ -34,6 +35,7 @@ public:
 	
 	UDaOverlayWidgetController* GetOverlayWidgetController(const FWidgetControllerParams& WCParams);
 	UDaStatMenuWidgetController* GetStatMenuWidgetController(const FWidgetControllerParams& WCParams);
+	UDaInventoryWidgetController* GetInventoryWidgetController(const FWidgetControllerParams& WCParams);
 
 	UFUNCTION(BlueprintCallable)
 	void InitRootLayout(APlayerController* PC);
@@ -49,6 +51,7 @@ public:
 
 	FORCEINLINE FGameplayTagContainer GetOverlayAttributeSetTags() { return OverlayWidgetAttributeSetTags; }
 	FORCEINLINE FGameplayTagContainer GetStatMenuAttributeSetTags() { return StatMenuWidgetAttributeSetTags; }
+	FORCEINLINE FGameplayTagContainer GetInventoryAttributeSetTags() { return InventoryWidgetAttributeSetTags; }
 
 protected:
 
@@ -99,7 +102,21 @@ protected:
 	// Runtime StatWidgetController instance pointer
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="UI|Stats")
 	TObjectPtr<UDaStatMenuWidgetController> StatMenuWidgetController;
-	
+
+	// Inventory
+
+	// Widget Controller setup to respond to a given InventoryComponent
+	UPROPERTY(EditAnywhere, Category="UI|Inventory")
+	TSubclassOf<UDaInventoryWidgetController> InventoryWidgetControllerClass;
+
+	// Inventory Attribute set GameplayTags
+	UPROPERTY(EditAnywhere, Category="UI|Inventory")
+	FGameplayTagContainer InventoryWidgetAttributeSetTags;
+
+	// Runtime Inventory WidgetController instance pointer
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="UI|Inventory")
+	TObjectPtr<UDaInventoryWidgetController> InventoryWidgetController;
+
 	// OnPrimaryGameLayoutLoaded Event
 	UPROPERTY(BlueprintAssignable, Category="Events")
 	FOnOnPrimaryGameLayoutLoaded OnPrimaryGameLayoutLoaded;

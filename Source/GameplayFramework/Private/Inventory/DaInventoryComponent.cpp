@@ -5,6 +5,7 @@
 #include "AbilitySystem/DaAbilitySet.h"
 #include "GameplayFramework.h"
 #include "Engine/AssetManager.h"
+#include "Inventory/DaInventoryItemBase.h"
 #include "Inventory/DaInventoryList.h"
 #include "Inventory/DaItemDefinition.h"
 #include "Net/UnrealNetwork.h"
@@ -124,6 +125,21 @@ bool UDaInventoryComponent::MoveItem(int32 FromSlot, int32 ToSlot)
 TArray<FDaInventoryEntry> UDaInventoryComponent::GetAllEntries() const
 {
 	return InventoryList.GetEntries();
+}
+
+TArray<UDaInventoryItemBase*> UDaInventoryComponent::GetItems()
+{
+	TArray<UDaInventoryItemBase*> Result;
+	const TArray<FDaInventoryEntry>& Entries = InventoryList.GetEntries();
+	Result.Reserve(Entries.Num());
+	for (const FDaInventoryEntry& Entry : Entries)
+	{
+		if (UDaInventoryItemBase* Item = UDaInventoryItemBase::CreateFromEntry(Entry, this))
+		{
+			Result.Add(Item);
+		}
+	}
+	return Result;
 }
 
 const FDaInventoryEntry* UDaInventoryComponent::GetEntryAtSlot(int32 SlotIndex) const

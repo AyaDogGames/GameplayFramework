@@ -39,6 +39,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	TArray<FDaInventoryEntry> GetAllEntries() const;
 
+	/**
+	 * Blueprint-compatibility bridge: build UI view-models for the current entries.
+	 * Existing inventory widgets were authored against the pre-FastArray component,
+	 * which exposed GetItems() returning UDaInventoryItemBase*. This rebuilds those
+	 * transient view-models on demand from the FastArray so those widgets keep working.
+	 * Prefer binding UMG to UDaInventoryWidgetController for new work.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	TArray<class UDaInventoryItemBase*> GetItems();
+
 	/** Returns a read-only pointer to the entry at the given slot, or nullptr if empty. */
 	const FDaInventoryEntry* GetEntryAtSlot(int32 SlotIndex) const;
 
