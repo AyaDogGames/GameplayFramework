@@ -288,6 +288,13 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 		return false;
 	}
 
+	if (!ItemDefinitionID.IsValid())
+	{
+		LOG_WARNING("Internal_AddItem: empty/invalid ItemDefinitionID passed by %s — the item must implement GetItemDefinitionID / have a UDaItemDefinition assigned",
+			*GetNameSafe(GetOwner()));
+		return false;
+	}
+
 	if (StackCount <= 0)
 	{
 		LOG_WARNING("Internal_AddItem: invalid StackCount %d for item %s", StackCount, *ItemDefinitionID.ToString());
