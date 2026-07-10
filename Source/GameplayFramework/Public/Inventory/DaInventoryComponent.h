@@ -45,8 +45,10 @@ public:
 	 * which exposed GetItems() returning UDaInventoryItemBase*. This rebuilds those
 	 * transient view-models on demand from the FastArray so those widgets keep working.
 	 * Prefer binding UMG to UDaInventoryWidgetController for new work.
+	 * BlueprintPure: legacy widgets call this as a data source without wiring
+	 * exec pins, and impure unconnected nodes get pruned by the compiler.
 	 */
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintPure, Category="Inventory")
 	TArray<class UDaInventoryItemBase*> GetItems();
 
 	/** Returns a read-only pointer to the entry at the given slot, or nullptr if empty. */
