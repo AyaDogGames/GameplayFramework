@@ -12,6 +12,7 @@ struct FDaInventoryEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInventoryItemsChanged, const TArray<UDaInventoryItemBase*>&, Items);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInventoryItemAtIndexChanged, const TArray<UDaInventoryItemBase*>&, Items, int32, SlotIndex);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInventoryItemAction, UDaInventoryItemBase*, Item, int32, SlotIndex);
 
 /**
  * UDaInventoryWidgetController
@@ -36,6 +37,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "DaInventoryWidgetController")
 	TArray<UDaInventoryItemBase*> GetItems() const;
 
+	/** Use the item at SlotIndex (server-authoritative; see UDaInventoryComponent::UseItem). */
+	UFUNCTION(BlueprintCallable, Category = "DaInventoryWidgetController")
+	bool UseItem(int32 SlotIndex);
+
+	/** Drop Count items from SlotIndex into the world; Count=0 drops the whole stack. */
+	UFUNCTION(BlueprintCallable, Category = "DaInventoryWidgetController")
+	bool DropItem(int32 SlotIndex, int32 Count = 1);
+
 	// Delegate to notify listeners when the whole inventory changes
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
 	FOnInventoryItemsChanged OnInventoryChanged;
@@ -43,6 +52,14 @@ public:
 	// Delegate to notify listeners when a single slot changes
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
 	FOnInventoryItemAtIndexChanged FOnInventoryItemChanged;
+
+	// Fires locally after the server confirms an item was used (e.g. play SFX, flash the slot)
+	UPROPERTY(BlueprintAssignable, Category="Inventory")
+	FOnInventoryItemAction OnItemUsed;
+
+	// Fires locally after the server confirms an item was dropped
+	UPROPERTY(BlueprintAssignable, Category="Inventory")
+	FOnInventoryItemAction OnItemDropped;
 
 protected:
 
@@ -64,4 +81,10 @@ protected:
 
 	UFUNCTION()
 	void HandleEntryChanged(const FDaInventoryEntry& Entry, int32 SlotIndex);
+
+	UFUNCTION()
+	void HandleItemUsed(const FDaInventoryEntry& Entry, int32 SlotIndex);
+
+	UFUNCTION()
+	void HandleItemDropped(const FDaInventoryEntry& Entry, int32 SlotIndex);
 };

@@ -3,8 +3,12 @@
 #include "Inventory/DaInventoryComponent.h"
 
 #include "AbilitySystem/DaAbilitySet.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "CoreGameplayTags.h"
+#include "DaItemActor.h"
 #include "GameplayFramework.h"
 #include "Engine/AssetManager.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryItemBase.h"
 #include "Inventory/DaInventoryList.h"
 #include "Inventory/DaItemDefinition.h"
@@ -119,6 +123,35 @@ bool UDaInventoryComponent::MoveItem(int32 FromSlot, int32 ToSlot)
 
 	// Client: route to server RPC
 	Server_MoveItem(FromSlot, ToSlot);
+	return true;
+}
+
+bool UDaInventoryComponent::UseItem(int32 SlotIndex)
+{
+	if (GetOwnerRole() == ROLE_Authority)
+	{
+		return Internal_UseItem(SlotIndex);
+	}
+
+	// Client: route to server RPC (optimistic return)
+	Server_UseItem(SlotIndex);
+	return true;
+}
+
+bool UDaInventoryComponent::DropItem(int32 SlotIndex, int32 Count)
+{
+	if (Count < 0)
+	{
+		return false;
+	}
+
+	if (GetOwnerRole() == ROLE_Authority)
+	{
+		return Internal_DropItem(SlotIndex, Count);
+	}
+
+	// Client: route to server RPC (optimistic return)
+	Server_DropItem(SlotIndex, Count);
 	return true;
 }
 
@@ -277,6 +310,42 @@ void UDaInventoryComponent::Server_MoveItem_Implementation(int32 FromSlot, int32
 	}
 }
 
+void UDaInventoryComponent::Server_UseItem_Implementation(int32 SlotIndex)
+{
+	if (!Internal_UseItem(SlotIndex))
+	{
+		LOG_WARNING("Server_UseItem failed for slot %d", SlotIndex);
+	}
+}
+
+void UDaInventoryComponent::Server_DropItem_Implementation(int32 SlotIndex, int32 Count)
+{
+	if (Count < 0)
+	{
+		LOG_WARNING("Server_DropItem: invalid Count %d", Count);
+		return;
+	}
+
+	if (!Internal_DropItem(SlotIndex, Count))
+	{
+		LOG_WARNING("Server_DropItem failed for slot %d", SlotIndex);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Client notifications
+// ---------------------------------------------------------------------------
+
+void UDaInventoryComponent::Client_NotifyItemUsed_Implementation(FDaInventoryEntry Entry)
+{
+	OnItemUsed.Broadcast(Entry, Entry.SlotIndex);
+}
+
+void UDaInventoryComponent::Client_NotifyItemDropped_Implementation(FDaInventoryEntry Entry)
+{
+	OnItemDropped.Broadcast(Entry, Entry.SlotIndex);
+}
+
 // ---------------------------------------------------------------------------
 // Internal add logic (server-only)
 // ---------------------------------------------------------------------------
@@ -301,22 +370,11 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 		return false;
 	}
 
-	// Load the item definition (synchronous — definitions should be small data assets)
-	UDaItemDefinition* Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(ItemDefinitionID));
+	UDaItemDefinition* Def = ResolveItemDefinition(ItemDefinitionID);
 	if (!Def)
 	{
-		// Try synchronous load via resolved asset path
-		FSoftObjectPath AssetPath = UAssetManager::Get().GetPrimaryAssetPath(ItemDefinitionID);
-		if (AssetPath.IsValid())
-		{
-			Def = Cast<UDaItemDefinition>(AssetPath.TryLoad());
-		}
-
-		if (!Def)
-		{
-			LOG_WARNING("Internal_AddItem: failed to load item definition %s", *ItemDefinitionID.ToString());
-			return false;
-		}
+		LOG_WARNING("Internal_AddItem: failed to load item definition %s", *ItemDefinitionID.ToString());
+		return false;
 	}
 
 	int32 Remaining = StackCount;
@@ -413,6 +471,150 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 	}
 
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Internal use/drop logic (server-only)
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::Internal_UseItem(int32 SlotIndex)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return false;
+	}
+
+	const FDaInventoryEntry* Entry = InventoryList.FindBySlot(SlotIndex);
+	if (!Entry)
+	{
+		LOG_WARNING("Internal_UseItem: no entry at slot %d", SlotIndex);
+		return false;
+	}
+
+	UDaItemDefinition* Def = ResolveItemDefinition(Entry->ItemDefinitionID);
+	if (!Def)
+	{
+		LOG_WARNING("Internal_UseItem: failed to load item definition %s", *Entry->ItemDefinitionID.ToString());
+		return false;
+	}
+
+	// Snapshot before any consume so listeners see the entry as it was used
+	const FDaInventoryEntry UsedEntry = *Entry;
+
+	// Let GAS abilities respond (e.g. an ability triggered by Action.UseItem applying the item's effect)
+	if (AActor* Avatar = ResolveOwnerAvatar())
+	{
+		FGameplayEventData Payload;
+		Payload.EventTag = CoreGameplayTags::TAG_Action_UseItem;
+		Payload.Instigator = Avatar;
+		Payload.OptionalObject = Def;
+		Payload.EventMagnitude = SlotIndex;
+		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Avatar, CoreGameplayTags::TAG_Action_UseItem, Payload);
+	}
+
+	if (Def->bConsumeOnUse)
+	{
+		RemoveItem(SlotIndex, 1);
+	}
+
+	Client_NotifyItemUsed(UsedEntry);
+	return true;
+}
+
+bool UDaInventoryComponent::Internal_DropItem(int32 SlotIndex, int32 Count)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return false;
+	}
+
+	const FDaInventoryEntry* Entry = InventoryList.FindBySlot(SlotIndex);
+	if (!Entry)
+	{
+		LOG_WARNING("Internal_DropItem: no entry at slot %d", SlotIndex);
+		return false;
+	}
+
+	UDaItemDefinition* Def = ResolveItemDefinition(Entry->ItemDefinitionID);
+	if (!Def)
+	{
+		LOG_WARNING("Internal_DropItem: failed to load item definition %s", *Entry->ItemDefinitionID.ToString());
+		return false;
+	}
+
+	AActor* Avatar = ResolveOwnerAvatar();
+	if (!Avatar)
+	{
+		LOG_WARNING("Internal_DropItem: no world avatar for inventory owner %s — nowhere to drop", *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	const int32 DropCount = (Count == 0) ? Entry->StackCount : FMath::Min(Count, Entry->StackCount);
+	const FDaInventoryEntry DroppedEntry = *Entry;
+
+	// Resolve pickup class before mutating inventory so a bad class fails the whole drop
+	UClass* PickupClass = Def->PickupActorClass.IsNull() ? ADaItemActor::StaticClass() : Def->PickupActorClass.LoadSynchronous();
+	if (!PickupClass)
+	{
+		LOG_WARNING("Internal_DropItem: failed to load PickupActorClass for %s", *Entry->ItemDefinitionID.ToString());
+		return false;
+	}
+
+	if (!RemoveItem(SlotIndex, DropCount >= DroppedEntry.StackCount ? 0 : DropCount))
+	{
+		return false;
+	}
+
+	// Spawn the world pickup in front of the avatar
+	const FVector SpawnLocation = Avatar->GetActorLocation() + Avatar->GetActorForwardVector() * 150.f;
+	const FTransform SpawnTransform(Avatar->GetActorRotation(), SpawnLocation);
+
+	// A single pickup actor represents the whole dropped stack
+	if (ADaItemActor* Pickup = GetWorld()->SpawnActorDeferred<ADaItemActor>(PickupClass, SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn))
+	{
+		Pickup->InitializeDroppedItem(DroppedEntry.ItemDefinitionID, Def->DisplayMesh.LoadSynchronous());
+		Pickup->FinishSpawning(SpawnTransform);
+	}
+
+	FDaInventoryEntry NotifyEntry = DroppedEntry;
+	NotifyEntry.StackCount = DropCount;
+	Client_NotifyItemDropped(NotifyEntry);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+UDaItemDefinition* UDaInventoryComponent::ResolveItemDefinition(FPrimaryAssetId ItemDefinitionID) const
+{
+	if (!ItemDefinitionID.IsValid())
+	{
+		return nullptr;
+	}
+
+	// Fast path: already loaded via the AssetManager
+	UDaItemDefinition* Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(ItemDefinitionID));
+	if (!Def)
+	{
+		// Synchronous load via resolved asset path (definitions are small data assets)
+		FSoftObjectPath AssetPath = UAssetManager::Get().GetPrimaryAssetPath(ItemDefinitionID);
+		if (AssetPath.IsValid())
+		{
+			Def = Cast<UDaItemDefinition>(AssetPath.TryLoad());
+		}
+	}
+	return Def;
+}
+
+AActor* UDaInventoryComponent::ResolveOwnerAvatar() const
+{
+	AActor* Owner = GetOwner();
+	if (const APlayerState* PS = Cast<APlayerState>(Owner))
+	{
+		return PS->GetPawn();
+	}
+	return Owner;
 }
 
 // ---------------------------------------------------------------------------

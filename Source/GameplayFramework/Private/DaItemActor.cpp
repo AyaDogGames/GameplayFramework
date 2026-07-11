@@ -112,6 +112,15 @@ void ADaItemActor::GrantSetToActor(UDaAbilitySystemComponent* ReceivingASC)
 	}
 }
 
+void ADaItemActor::InitializeDroppedItem(const FPrimaryAssetId& InItemDefinitionID, UStaticMesh* DisplayMesh)
+{
+	ItemDefinitionID = InItemDefinitionID;
+	if (DisplayMesh)
+	{
+		MeshComp->SetStaticMesh(DisplayMesh);
+	}
+}
+
 void ADaItemActor::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);

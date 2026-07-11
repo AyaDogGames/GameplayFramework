@@ -39,6 +39,9 @@ public:
 
 	void GrantSetToActor(UDaAbilitySystemComponent* ReceivingASC);
 
+	/** Set up an actor spawned for a dropped inventory item (server, before FinishSpawning). */
+	void InitializeDroppedItem(const FPrimaryAssetId& InItemDefinitionID, UStaticMesh* DisplayMesh);
+
 protected:
 
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category="Components")

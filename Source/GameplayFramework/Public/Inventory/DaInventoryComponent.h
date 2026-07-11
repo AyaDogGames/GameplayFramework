@@ -35,6 +35,25 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	bool MoveItem(int32 FromSlot, int32 ToSlot);
 
+	/**
+	 * Use the item at SlotIndex. Server-authoritative: sends an Action.UseItem gameplay
+	 * event to the owner's ability system (OptionalObject = UDaItemDefinition,
+	 * EventMagnitude = SlotIndex), consumes one from the stack when the definition has
+	 * bConsumeOnUse, and notifies the owning client through OnItemUsed.
+	 * Routes to server if called on client.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	bool UseItem(int32 SlotIndex);
+
+	/**
+	 * Drop Count items from SlotIndex into the world. Server-authoritative: removes them
+	 * from the inventory and spawns the definition's PickupActorClass (ADaItemActor by
+	 * default) in front of the owner's pawn so it can be picked back up.
+	 * Count=0 drops the entire stack. Routes to server if called on client.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	bool DropItem(int32 SlotIndex, int32 Count = 1);
+
 	/** Returns a copy of all inventory entries. */
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	TArray<FDaInventoryEntry> GetAllEntries() const;
@@ -93,6 +112,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
 	FOnInventoryEntryEvent OnEntryChanged;
 
+	/** Fires on the owning client (and standalone/listen host) after an item is successfully used. */
+	UPROPERTY(BlueprintAssignable, Category="Inventory")
+	FOnInventoryEntryEvent OnItemUsed;
+
+	/** Fires on the owning client (and standalone/listen host) after an item is successfully dropped. */
+	UPROPERTY(BlueprintAssignable, Category="Inventory")
+	FOnInventoryEntryEvent OnItemDropped;
+
 	// ----- Internal callbacks (called by FDaInventoryEntry FastArray callbacks) -----
 
 	void OnEntryAddedInternal(const FDaInventoryEntry& Entry);
@@ -131,10 +158,36 @@ private:
 	UFUNCTION(Server, Reliable)
 	void Server_MoveItem(int32 FromSlot, int32 ToSlot);
 
+	UFUNCTION(Server, Reliable)
+	void Server_UseItem(int32 SlotIndex);
+
+	UFUNCTION(Server, Reliable)
+	void Server_DropItem(int32 SlotIndex, int32 Count);
+
+	// ----- Client notifications (run on the owning client; locally on standalone/listen host) -----
+
+	UFUNCTION(Client, Reliable)
+	void Client_NotifyItemUsed(FDaInventoryEntry Entry);
+
+	UFUNCTION(Client, Reliable)
+	void Client_NotifyItemDropped(FDaInventoryEntry Entry);
+
 	// ----- Internal helpers -----
 
 	/** Server-only logic: loads definition, finds or creates slot, adds or stacks entry. */
 	bool Internal_AddItem(FPrimaryAssetId ItemDefinitionID, int32 StackCount, int32 SlotHint);
+
+	/** Server-only logic: validate entry, fire gameplay event, consume stack, notify client. */
+	bool Internal_UseItem(int32 SlotIndex);
+
+	/** Server-only logic: remove from inventory and spawn a world pickup actor. */
+	bool Internal_DropItem(int32 SlotIndex, int32 Count);
+
+	/** Resolve and (if needed) synchronously load the item definition for an ID. */
+	class UDaItemDefinition* ResolveItemDefinition(FPrimaryAssetId ItemDefinitionID) const;
+
+	/** Resolve the pawn that represents this inventory's owner in the world (owner itself or PlayerState's pawn). */
+	AActor* ResolveOwnerAvatar() const;
 };
 
 /**

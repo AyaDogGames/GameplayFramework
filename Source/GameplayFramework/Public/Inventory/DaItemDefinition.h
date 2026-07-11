@@ -7,6 +7,7 @@
 #include "Engine/DataAsset.h"
 #include "DaItemDefinition.generated.h"
 
+class ADaItemActor;
 class UDaAbilitySet;
 class UTexture2D;
 class UStaticMesh;
@@ -63,6 +64,18 @@ public:
 	/** Ability set granted to the owner while this item is active / equipped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Abilities")
 	TSoftObjectPtr<UDaAbilitySet> AbilitySetToGrant;
+
+	// ----- Usage -----
+
+	/** If true, using this item consumes one from the stack (removing the entry when it hits zero). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Usage")
+	bool bConsumeOnUse = false;
+
+	// ----- Dropping -----
+
+	/** Actor class spawned when this item is dropped from an inventory. Falls back to ADaItemActor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Dropping")
+	TSoftClassPtr<ADaItemActor> PickupActorClass;
 
 	// ----- Equipment -----
 

@@ -30,6 +30,14 @@ void UDaInventoryWidgetController::InitializeInventory(AActor* Actor)
 	{
 		InventoryComponent->OnEntryChanged.AddDynamic(this, &UDaInventoryWidgetController::HandleEntryChanged);
 	}
+	if (!InventoryComponent->OnItemUsed.IsAlreadyBound(this, &UDaInventoryWidgetController::HandleItemUsed))
+	{
+		InventoryComponent->OnItemUsed.AddDynamic(this, &UDaInventoryWidgetController::HandleItemUsed);
+	}
+	if (!InventoryComponent->OnItemDropped.IsAlreadyBound(this, &UDaInventoryWidgetController::HandleItemDropped))
+	{
+		InventoryComponent->OnItemDropped.AddDynamic(this, &UDaInventoryWidgetController::HandleItemDropped);
+	}
 
 	// Build view-models for any items already present and broadcast the initial state.
 	RebuildItems();
@@ -45,6 +53,26 @@ TArray<UDaInventoryItemBase*> UDaInventoryWidgetController::GetItems() const
 		Result.Add(Item);
 	}
 	return Result;
+}
+
+bool UDaInventoryWidgetController::UseItem(int32 SlotIndex)
+{
+	if (!InventoryComponent)
+	{
+		LOG_WARNING("UDaInventoryWidgetController::UseItem: not initialized (call InitializeInventory first)");
+		return false;
+	}
+	return InventoryComponent->UseItem(SlotIndex);
+}
+
+bool UDaInventoryWidgetController::DropItem(int32 SlotIndex, int32 Count)
+{
+	if (!InventoryComponent)
+	{
+		LOG_WARNING("UDaInventoryWidgetController::DropItem: not initialized (call InitializeInventory first)");
+		return false;
+	}
+	return InventoryComponent->DropItem(SlotIndex, Count);
 }
 
 void UDaInventoryWidgetController::RebuildItems()
@@ -84,4 +112,16 @@ void UDaInventoryWidgetController::HandleEntryChanged(const FDaInventoryEntry& E
 	RebuildItems();
 	FOnInventoryItemChanged.Broadcast(GetItems(), SlotIndex);
 	OnInventoryChanged.Broadcast(GetItems());
+}
+
+void UDaInventoryWidgetController::HandleItemUsed(const FDaInventoryEntry& Entry, int32 SlotIndex)
+{
+	// Build a one-off view-model from the entry snapshot: the slot may already have
+	// been consumed/emptied by the time this confirmation arrives.
+	OnItemUsed.Broadcast(UDaInventoryItemBase::CreateFromEntry(Entry, this), SlotIndex);
+}
+
+void UDaInventoryWidgetController::HandleItemDropped(const FDaInventoryEntry& Entry, int32 SlotIndex)
+{
+	OnItemDropped.Broadcast(UDaInventoryItemBase::CreateFromEntry(Entry, this), SlotIndex);
 }
