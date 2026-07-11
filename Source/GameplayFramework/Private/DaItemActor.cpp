@@ -64,7 +64,12 @@ void ADaItemActor::AddToInventory_Implementation(APawn* InstigatorPawn, bool bDe
 
 void ADaItemActor::Interact_Implementation(APawn* InstigatorPawn)
 {
-	// Derived classes to implement
+	// Default behavior: items with a valid definition go into the instigator's inventory.
+	// Derived classes can override for other interact behavior.
+	if (ItemDefinitionID.IsValid())
+	{
+		Execute_AddToInventory(this, InstigatorPawn, true);
+	}
 }
 
 void ADaItemActor::SecondaryInteract_Implementation(APawn* InstigatorPawn)
