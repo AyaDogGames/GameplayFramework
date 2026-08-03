@@ -4,13 +4,21 @@ This is the canonical guide for AI agents and contributors working in this repos
 
 ## What this is
 
-`GameplayFramework` is an **Unreal Engine 5.7** C++ plugin for building fully replicated, **data-driven Gameplay Ability System (GAS)** games. Almost everything is wired up through GameplayTags, Data Assets, and Data Tables; core classes are meant to be subclassed in C++ or Blueprints. Prefix conventions: `Da` (GameplayFramework module), `CE` (Collectibles module); `U`=UObject/component, `A`=Actor, `F`=struct, `I`=interface.
+`GameplayFramework` is an **Unreal Engine 5.8** C++ plugin for building fully replicated, **data-driven Gameplay Ability System (GAS)** games. Almost everything is wired up through GameplayTags, Data Assets, and Data Tables; core classes are meant to be subclassed in C++ or Blueprints. Prefix conventions: `Da` (GameplayFramework module), `CE` (Collectibles module); `U`=UObject/component, `A`=Actor, `F`=struct, `I`=interface.
 
-## Critical: this is a SHARED plugin (symlink, not a submodule)
+## Critical: this is a SHARED plugin (one checkout in a `SharedPlugins/` container)
 
-- This plugin is its **own git repo** (`AyaDogGames/ModularGameplayFramework`), checked out at `C:/Source/GameplayFramework`.
-- Consumer projects (GlitchShaper, CollectorsEdition, Glitchwalker) do **not** vendor or submodule it. Their `setup.sh` creates `Plugins/GameplayFramework` as a **symlink/junction** to this one shared checkout. Each consumer `.gitignore`s that path and ships an empty `.gitmodules`.
-- **Editing any file under a consumer's `Plugins/GameplayFramework` edits this one shared repo and affects every consumer.** Always commit plugin changes from `C:/Source/GameplayFramework` directly — never through a consumer's `Plugins/GameplayFramework` path.
+- This plugin is its **own git repo** (`https://github.com/AyaDogGames/GameplayFramework.git`,
+  formerly `ModularGameplayFramework` — GitHub redirects the old URL), checked out at
+  `C:/Source/SharedPlugins/GameplayFramework`.
+- Consumer projects (GlitchShaper, CollectorsEdition, Glitchwalker) do **not** vendor, submodule,
+  or symlink it. Each consumer's `.uproject` declares
+  `"AdditionalPluginDirectories": [ "../SharedPlugins" ]` — the engine scans the *children* of
+  that container for `.uplugin` files. There is **no `Plugins/GameplayFramework`** inside any
+  consumer repo; each consumer's `setup.sh` clones this repo into the container if missing.
+- **There is exactly one copy on disk — editing it affects every consumer.** Commit plugin
+  changes in this repo, on this repo's branches; after any plugin change, rebuild all consumer
+  projects before committing on their side.
 
 ## Modules (both Runtime — there is NO editor module)
 
@@ -35,7 +43,7 @@ There is **NO `GameplayFrameworkEditor` module** and no editor target of any kin
 - **`AbilitySystem/`** — `UDaAbilitySystemComponent`, `UDaAbilitySystemLibrary`, `UDaAbilitySet : UPrimaryDataAsset`. `Abilities/`: `UDaGameplayAbilityBase`, `UDaGameplayAbility_BaseTriggeredInputAction`, `UDaGameplayAbility_Death`, `UDaGameplayAbility_Projectile`, and the look/move input abilities `UUDaGameplayAbility_LookAction` / `UUDaGameplayAbility_MoveAction` (the literal **double-`U`** prefix is real — in both type name and filename; do not "fix" it). `Effects/`: `UDaGameplayEffect_DealDamage`, `UDaGameplayEffect_HealToMax`. `Modifiers/`: `UDaMMC_Health`. `Tasks/`: `UDaAbilityTask_TargetDataUnderCursor`.
 - **`AbilitySystem/Attributes/`** — `UDaBaseAttributeSet` (carries a `SetIdentifierTag`; subclasses map tags->attributes via `TagsToAttributes` in their constructor); `UDaCharacterAttributeSet` (Health/Mana), `UDaCombatAttributeSet` (damage/healing meta), `UDaDynamicAttributeSet`; `UDaExecution_HealWithMana`; data assets `UDaAttributeInfo`, `UDaAttributeSetDataAsset`.
 - **`AI/`** — `ADaAICharacter : ADaCharacterBase`; `ADAAICharacter_NPC : ACharacter, IAbilitySystemInterface` (dialog NPC, **not** a `ADaCharacterBase`); `ADaAIController`; BT services `UDaBTService_CheckAttackRange`, `UDaBTService_CheckLowHealth`; BT tasks `UDaBTTask_DoAbilityToSelf`, `UDaBTTask_DoAbilityToTargetActor`; `UDaNPCDialogData`.
-- **`Inventory/`** — the **new `FFastArraySerializer` system** (five files in each of Public/Private): `UDaInventoryComponent` (server-authoritative; replicates a `FDaInventoryList`, `MaxSlots=20`, `InventoryTags`; `AddItem`/`RemoveItem`/`MoveItem`/`Save`/`Load`, static `GetInventoryFromActor`; `OnEntryAdded`/`Removed`/`Changed` delegates; `Server_AddItem`/`RemoveItem`/`MoveItem` RPCs + `Internal_AddItem`), `UDaMasterInventory` (empty Blueprintable subclass), `FDaInventoryEntry : FFastArraySerializerItem`, `FDaInventoryList : FFastArraySerializer`, `UDaItemDefinition : UPrimaryDataAsset` (`GetPrimaryAssetId()` -> type `"ItemDefinition"`), `IDaInventoryItemInterface` (`GetItemDefinitionID`/`GetStackCount`/`AddToInventory`). The old UObject-based inventory (item base classes, factory, equipment component, blueprint library, UI widget/controller) was **deleted** — do not document it.
+- **`Inventory/`** — the **`FFastArraySerializer` system** (nine files in each of Public/Private): `UDaInventoryComponent` (server-authoritative; replicates a `FDaInventoryList`, `MaxSlots=20`, `InventoryTags`; `AddItem`/`RemoveItem`/`MoveItem`/`UseItem`/`DropItem`/`SaveInventory`/`LoadInventory`, static `GetInventoryFromActor`; `OnEntryAdded`/`Removed`/`Changed` + `OnItemUsed`/`OnItemDropped` delegates; `Server_*` RPCs + `Internal_AddItem`; delegates broadcast on authority AND from FastArray client callbacks — mutate only via the BlueprintCallable API). `UseItem` sends an `Action.UseItem` gameplay event to the owner's ASC (OptionalObject=definition, EventMagnitude=slot) and consumes when `bConsumeOnUse`; `DropItem` spawns the definition's `PickupActorClass` (default `ADaItemActor`) in front of the pawn. `FDaInventoryEntry : FFastArraySerializerItem`, `FDaInventoryList : FFastArraySerializer`, `UDaItemDefinition : UPrimaryDataAsset` (`GetPrimaryAssetId()` -> type `"ItemDefinition"`; fields: DisplayName/Description/Icon/DisplayMesh/ItemTags/MaxStackCount/`AbilitySetToGrant`/`bConsumeOnUse`/`PickupActorClass`/`EquipSlotTags`), `IDaInventoryItemInterface` (`GetItemDefinitionID`/`GetStackCount`/`AddToInventory`), `UDaMasterInventory` (empty Blueprintable subclass). **UI adapter layer** (also under `Inventory/`, recreated as thin view-models over the FastArray — NOT replicated): `UDaInventoryItemBase` (`CreateFromEntry`), `UDaStackableInventoryItem`, `UDaInventoryUIWidget` (`IUserObjectListEntry` list-entry widget), `UDaInventoryWidgetController` (binds entry delegates, rebuilds view-model array, `UseItem`/`DropItem` pass-throughs); `UDaInventoryComponent::GetItems()` is the BlueprintPure BP-compat bridge returning those view-models — prefer the widget controller for new work. The old UObject-based inventory factory, equipment component, and blueprint library were **deleted and not recreated**. `ADaItemActor::Interact` adds the actor's `ItemDefinitionID` to the interactor's inventory when valid (no-op with a log warning otherwise).
 - **`UI/`** — CommonUI + MVVM. Widget controllers `UDaWidgetController` -> `UDaOverlayWidgetController` -> `UDaOverlayWidgetController_Vitals`, plus `UDaStatMenuWidgetController`. CommonUI widgets `UDaActivatableWidget`, `UDaUserWidgetBase`, `UDaOverlayWidgetBase`, `UDaGameMenuBase`, `UDaPanelWidget`, `UDaPrimaryGameLayout`, `UDaTaggedWidget`. UUserWidget-based `UDaWorldUserWidget`, `UDaDamageWidget`, `UDaMessageWidget`. `ADaHUD`, `UDaCommonUIExtensions`; data assets `UDaUILevelData`, `UDaWidgetMessageData`. The only `UMVVMViewModelBase` in the plugin is the Collectibles `UCECollectibleViewModel` — there is **no** inventory ViewModel.
 - **Characters / game framework (`Public/` root)** — `ADaCharacterBase` (+ `IDaCharacterInterface`), `ADaCharacter`, `ADaPlayerCharacter_ThirdPerson`; `ADaPlayerState` (defines `FPlayerCharacterInfoRow : FTableRowBase`), `ADaPlayerController`, `ADaPlayerController_TopDown`; `ADaGameModeBase`, `ADaGameStateBase`, `UDaGameInstanceBase`; `UDaPawnData`; `UDaAttributeComponent` (vitals/Death); `UDaCommonGameViewportClient`.
 - **Input** — `UDaInputComponent : UEnhancedInputComponent` (set as the project's Default Input Component Class); `UDaInputConfig : UDataAsset` (Input tag -> InputAction map).
@@ -62,9 +70,9 @@ Declared with `DA_DECLARE_GAMEPLAY_TAG_EXTERN` / `CE_DECLARE_GAMEPLAY_TAG_EXTERN
 
 ## Build / run
 
-1. The plugin compiles as part of a consuming UE 5.7 project — there is no standalone build.
+1. The plugin compiles as part of a consuming UE 5.8 project — there is no standalone build.
 2. Run the project's **GenerateProjectFiles** so both modules are detected, then build the `.sln` (Windows) / project from your IDE or the editor.
-3. Engine reference for API checks: `C:/Source/UnrealEngine` (UE 5.7.4, release).
+3. Engine reference for API checks: `C:/Source/UnrealEngine` (UE 5.8.0 source, branch UE5; includes the Lyra sample at `Samples/Games/Lyra`).
 
 ## No automated tests
 
