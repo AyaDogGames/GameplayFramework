@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Inventory/DaInventoryEntry.h"
+#include "Inventory/DaInventoryComponent.h"
 #include "GameFramework/SaveGame.h"
 #include "DaSaveGame.generated.h"
 
@@ -110,6 +111,11 @@ public:
 
 	UPROPERTY()
 	TArray<FDaInventoryEntry> SavedInventory;
+
+	/* Which item the player wants in which Equip.Slot.*. Per-instance item stats need no
+	 * entry here: they live in FDaInventoryEntry::StatTags and ride SavedInventory. */
+	UPROPERTY()
+	TArray<FDaLoadoutEntry> SavedLoadout;
 
 	FPlayerSaveData()
 	{

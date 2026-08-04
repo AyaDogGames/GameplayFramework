@@ -152,8 +152,28 @@ bool UDaSaveGameSubsystem::OverrideSpawnTransform(AController* NewPlayer)
 	return false;
 }
 
+bool UDaSaveGameSubsystem::ReloadPlayerState(APlayerState* PlayerState)
+{
+	ADaPlayerState* PS = Cast<ADaPlayerState>(PlayerState);
+	if (PS == nullptr || CurrentSaveGame == nullptr)
+	{
+		return false;
+	}
+
+	PS->LoadPlayerState(CurrentSaveGame);
+	return true;
+}
+
 void UDaSaveGameSubsystem::WriteSaveGame()
 {
+	if (CurrentSaveGame == nullptr)
+	{
+		// Nothing loaded or created yet (no slot name configured); callers that go through
+		// SaveInGameProgressData always have one by this point.
+		LOG("WriteSaveGame: no CurrentSaveGame to write into.");
+		return;
+	}
+
 	// Clear arrays, may contain data from previously loaded SaveGame
 	CurrentSaveGame->SavedPlayers.Empty();
 	CurrentSaveGame->SavedActors.Empty();
