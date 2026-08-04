@@ -2,14 +2,22 @@
 
 #include "Equipment/DaEquipmentList.h"
 
+#include "Equipment/DaEquipmentManagerComponent.h"
+
 void FDaAppliedEquipmentEntry::PreReplicatedRemove(const FDaEquipmentList& InArraySerializer)
 {
-	// Filled in Task 4: forwards to OwnerComponent->HandleUnequipped(*this).
+	if (InArraySerializer.OwnerComponent)
+	{
+		InArraySerializer.OwnerComponent->HandleUnequipped(*this);
+	}
 }
 
 void FDaAppliedEquipmentEntry::PostReplicatedAdd(const FDaEquipmentList& InArraySerializer)
 {
-	// Filled in Task 4: forwards to OwnerComponent->HandleEquipped(*this).
+	if (InArraySerializer.OwnerComponent)
+	{
+		InArraySerializer.OwnerComponent->HandleEquipped(*this);
+	}
 }
 
 void FDaAppliedEquipmentEntry::PostReplicatedChange(const FDaEquipmentList& InArraySerializer)

@@ -98,6 +98,9 @@ public:
 
 	void TakeFromAbilitySystem(UDaAbilitySystemComponent* DaASC);
 
+	/** Granted ability specs, for callers that map handles back to their source (equipment). */
+	const TArray<FGameplayAbilitySpecHandle>& GetAbilitySpecHandles() const { return AbilitySpecHandles; }
+
 protected:
 
 	// Handles to the granted abilities.

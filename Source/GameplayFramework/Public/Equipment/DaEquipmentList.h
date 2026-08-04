@@ -75,10 +75,9 @@ struct GAMEPLAYFRAMEWORK_API FDaEquipmentList : public FFastArraySerializer
 	UPROPERTY()
 	TArray<FDaAppliedEquipmentEntry> Entries;
 
-	// Owning component — set during initialisation, never replicated. Deliberately not a
-	// UPROPERTY: the component owns this struct, so the back-pointer needs no GC reference,
-	// and UHT cannot reflect a class that is only forward-declared here.
-	UDaEquipmentManagerComponent* OwnerComponent;
+	// Owning component — set during initialisation, never replicated.
+	UPROPERTY(NotReplicated)
+	TObjectPtr<UDaEquipmentManagerComponent> OwnerComponent;
 };
 
 /** Enable NetDeltaSerialize for FDaEquipmentList. */
