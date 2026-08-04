@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ActiveGameplayEffectHandle.h"
 #include "Components/ActorComponent.h"
 #include "GameplayAbilitySpecHandle.h"
 #include "Equipment/DaEquipmentList.h"
@@ -12,9 +13,20 @@ class UDaAbilitySystemComponent;
 class UDaInventoryComponent;
 class UDaItemDefinition;
 class UGameplayAbility;
+struct FDaConditionConfig;
 struct FDaInventoryEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEquipmentEntryEvent, const FDaAppliedEquipmentEntry&, Entry);
+
+/** Which penalty an equipped item's Condition currently earns it (see FDaConditionConfig). */
+enum class EDaConditionBand : uint8
+{
+	Normal,
+	Worn,
+	Critical,
+	/** Condition 0: the item is inert. It auto-unequips and cannot be re-equipped until repaired. */
+	Broken
+};
 
 /**
  * UDaEquipmentManagerComponent
@@ -107,14 +119,20 @@ private:
 	/** Which slot holds ItemID, or an invalid tag. */
 	FGameplayTag FindSlotForItem(const FGuid& ItemID) const;
 
-	/** Authority-only, idempotent: subscribe to the resolved inventory's removal delegate so an
-	 *  item that leaves the inventory cannot stay equipped. The inventory lives on the
-	 *  PlayerState, which is not always assigned by BeginPlay, so ApplyLoadout retries. */
+	/** Authority-only, idempotent: subscribe to the resolved inventory's removal and change
+	 *  delegates so an item that leaves the inventory cannot stay equipped and a Condition write
+	 *  re-evaluates the wearer's penalties. The inventory lives on the PlayerState, which is not
+	 *  always assigned by BeginPlay, so ApplyLoadout retries. */
 	void EnsureInventoryBinding();
 
 	/** Bound to UDaInventoryComponent::OnEntryRemoved on the authority. */
 	UFUNCTION()
 	void OnInventoryEntryRemoved(const FDaInventoryEntry& Entry, int32 SlotIndex);
+
+	/** Bound to UDaInventoryComponent::OnEntryChanged on the authority: a stat write on an
+	 *  equipped condition-user may have moved it into another Condition band. */
+	UFUNCTION()
+	void OnInventoryEntryChanged(const FDaInventoryEntry& Entry, int32 SlotIndex);
 
 	/** Authority-only, idempotent: subscribe to the owner ASC's ability-activated callback so
 	 *  using an item's ability wears that item down. The ASC lives on the PlayerState, which
@@ -125,6 +143,18 @@ private:
 	 *  an item-granted ability costs that item DecayPerUse Condition. */
 	void OnAbilityActivated(UGameplayAbility* Ability);
 
+	/** Authority-only: re-evaluate the Condition band of the item in SlotTag and make the ASC
+	 *  match it — swap in the band's penalty effect, or unequip the slot outright when the item
+	 *  has broken (Condition 0). Cheap and idempotent, so the equip path and every entry-changed
+	 *  broadcast can both call it. */
+	void RefreshConditionPenalty(FGameplayTag SlotTag);
+
+	/** Authority-only: drop the penalty effect tracked for SlotTag, if any. */
+	void ClearConditionPenalty(FGameplayTag SlotTag);
+
+	/** Condition (absolute) against the config's percentage thresholds of the grade-derived cap. */
+	static EDaConditionBand ComputeConditionBand(const FDaConditionConfig& Config, int32 Condition, int32 Grade);
+
 	/** PlayerState (preferred) or owner inventory component. */
 	UDaInventoryComponent* ResolveInventory() const;
 	UDaAbilitySystemComponent* ResolveASC() const;
@@ -132,6 +162,12 @@ private:
 
 	/** Server-only: ability spec handle -> granting item. */
 	TMap<FGameplayAbilitySpecHandle, FGuid> AbilityToItemMap;
+
+	/** Server-only: the penalty effect currently applied for each occupied slot, and the band it
+	 *  represents. Keyed by slot rather than by item so a swap into the same slot cannot leak the
+	 *  previous item's penalty. Normal-band slots hold no entry in either map. */
+	TMap<FGameplayTag, FActiveGameplayEffectHandle> ConditionPenaltyHandles;
+	TMap<FGameplayTag, EDaConditionBand> ConditionBands;
 
 	/** Inventory whose OnEntryRemoved this component is currently bound to (authority only). */
 	TWeakObjectPtr<UDaInventoryComponent> BoundInventory;

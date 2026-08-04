@@ -13,6 +13,7 @@
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystem/DaAbilitySet.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
+#include "GameplayEffect.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "Inventory/DaInventoryEntry.h"
 #include "Inventory/DaItemDefinition.h"
@@ -45,6 +46,7 @@ void UDaEquipmentManagerComponent::EndPlay(const EEndPlayReason::Type EndPlayRea
 	if (UDaInventoryComponent* Inventory = BoundInventory.Get())
 	{
 		Inventory->OnEntryRemoved.RemoveDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
+		Inventory->OnEntryChanged.RemoveDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryChanged);
 	}
 	BoundInventory.Reset();
 
@@ -94,6 +96,7 @@ void UDaEquipmentManagerComponent::EnsureInventoryBinding()
 	}
 
 	Inventory->OnEntryRemoved.AddDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
+	Inventory->OnEntryChanged.AddDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryChanged);
 	BoundInventory = Inventory;
 }
 
@@ -176,6 +179,152 @@ void UDaEquipmentManagerComponent::OnInventoryEntryRemoved(const FDaInventoryEnt
 	if (Slot.IsValid())
 	{
 		Internal_UnequipSlot(Slot);
+	}
+}
+
+void UDaEquipmentManagerComponent::OnInventoryEntryChanged(const FDaInventoryEntry& Entry, int32 SlotIndex)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	// Entries change for all sorts of reasons (stack counts, any stat, a slot move) and most
+	// items are not equipped; only the equipped instance can earn a penalty, so the slot lookup
+	// is the cheap gate in front of the real work.
+	const FGameplayTag Slot = FindSlotForItem(Entry.ItemID);
+	if (Slot.IsValid())
+	{
+		RefreshConditionPenalty(Slot);
+	}
+}
+
+EDaConditionBand UDaEquipmentManagerComponent::ComputeConditionBand(const FDaConditionConfig& Config, int32 Condition, int32 Grade)
+{
+	// A stat count of 0 is also how "no such stat" is stored, so an item that never had its
+	// Condition filled in reads as broken. That is the intended reading: the acquisition path
+	// fills Condition for every condition-using item it creates.
+	if (Condition <= 0)
+	{
+		return EDaConditionBand::Broken;
+	}
+
+	const int32 Cap = Config.GetConditionCap(Grade);
+	if (Cap <= 0)
+	{
+		// Nothing to be a percentage of — a misconfigured cap must not invent penalties.
+		return EDaConditionBand::Normal;
+	}
+
+	// Integer percent of the cap, floored: thresholds are "below this percent", so 25% of an
+	// 88-point cap (22) is Worn and 21 is Critical.
+	const int32 Percent = (Condition * 100) / Cap;
+	if (Percent < Config.CriticalThresholdPct)
+	{
+		return EDaConditionBand::Critical;
+	}
+	if (Percent < Config.WornThresholdPct)
+	{
+		return EDaConditionBand::Worn;
+	}
+	return EDaConditionBand::Normal;
+}
+
+void UDaEquipmentManagerComponent::ClearConditionPenalty(FGameplayTag SlotTag)
+{
+	FActiveGameplayEffectHandle Handle;
+	if (ConditionPenaltyHandles.RemoveAndCopyValue(SlotTag, Handle) && Handle.IsValid())
+	{
+		if (UDaAbilitySystemComponent* ASC = ResolveASC())
+		{
+			ASC->RemoveActiveGameplayEffect(Handle);
+		}
+	}
+	ConditionBands.Remove(SlotTag);
+}
+
+void UDaEquipmentManagerComponent::RefreshConditionPenalty(FGameplayTag SlotTag)
+{
+	if (GetOwnerRole() != ROLE_Authority || !SlotTag.IsValid())
+	{
+		return;
+	}
+
+	const FGuid ItemID = GetEquippedItemID(SlotTag);
+	if (!ItemID.IsValid())
+	{
+		ClearConditionPenalty(SlotTag);
+		return;
+	}
+
+	UDaInventoryComponent* Inventory = ResolveInventory();
+	const FDaInventoryEntry* Entry = Inventory ? Inventory->FindEntryByItemID(ItemID) : nullptr;
+	if (!Entry)
+	{
+		// The item left the inventory; OnInventoryEntryRemoved unequips the slot and clears up.
+		return;
+	}
+	// Copy before anything below can reallocate the entry array.
+	const FPrimaryAssetId EntryDefinitionID = Entry->ItemDefinitionID;
+	Entry = nullptr;
+
+	const UDaItemDefinition* Def = ResolveItemDefinition(EntryDefinitionID);
+	if (!Def || !Def->ConditionConfig.bUsesCondition)
+	{
+		return;
+	}
+
+	const int32 Condition = Inventory->GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition);
+	const int32 Grade = Inventory->GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade);
+	const EDaConditionBand Band = ComputeConditionBand(Def->ConditionConfig, Condition, Grade);
+
+	const EDaConditionBand* Tracked = ConditionBands.Find(SlotTag);
+	if (Tracked && *Tracked == Band)
+	{
+		// Every point of decay lands here; only a band crossing costs an effect swap.
+		return;
+	}
+
+	if (Band == EDaConditionBand::Broken)
+	{
+		LOG_WARNING("[%s] %s broke (Condition 0) and was unequipped from %s — repair required",
+			*GetNameSafe(GetOwner()), *Def->GetName(), *SlotTag.ToString());
+		// The loadout ASSIGNMENT deliberately survives (M1 semantics), so a repaired item is one
+		// hotbar press from being back in this slot. Internal_UnequipSlot clears the penalty.
+		Internal_UnequipSlot(SlotTag);
+		return;
+	}
+
+	ClearConditionPenalty(SlotTag);
+	ConditionBands.Add(SlotTag, Band);
+
+	TSubclassOf<UGameplayEffect> EffectClass;
+	if (Band == EDaConditionBand::Critical)
+	{
+		EffectClass = Def->ConditionConfig.CriticalEffect;
+	}
+	else if (Band == EDaConditionBand::Worn)
+	{
+		EffectClass = Def->ConditionConfig.WornEffect;
+	}
+	if (!EffectClass)
+	{
+		// Normal, or a band the definition deliberately left without an effect.
+		return;
+	}
+
+	UDaAbilitySystemComponent* ASC = ResolveASC();
+	if (!ASC)
+	{
+		LOG_WARNING("[%s] condition penalty for %s: no ASC to apply %s to",
+			*GetNameSafe(GetOwner()), *Def->GetName(), *EffectClass->GetName());
+		return;
+	}
+	const FActiveGameplayEffectHandle Handle = ASC->ApplyGameplayEffectToSelf(
+		EffectClass->GetDefaultObject<UGameplayEffect>(), 1.f, ASC->MakeEffectContext());
+	if (Handle.IsValid())
+	{
+		ConditionPenaltyHandles.Add(SlotTag, Handle);
 	}
 }
 
@@ -296,6 +445,18 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 		return false;
 	}
 
+	// Inert at zero. Checked here, before any slot is resolved or vacated, so a refused equip
+	// leaves the equipment state exactly as it was. Note a stat count cannot distinguish "0" from
+	// "absent", so a condition-using item that never went through the acquisition fill also reads
+	// as inert.
+	if (Def->ConditionConfig.bUsesCondition
+		&& Inventory->GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition) <= 0)
+	{
+		LOG_WARNING("[%s] EquipItem: %s is inert — repair required (Condition 0)",
+			*GetNameSafe(GetOwner()), *Def->GetName());
+		return false;
+	}
+
 	// Resolve slot: explicit tag must be allowed; empty tag = first allowed free slot.
 	if (SlotTag.IsValid())
 	{
@@ -413,6 +574,10 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 	EquipmentList.MarkItemDirty(EquipmentList.Entries.Last());
 	// Authority-side broadcast (clients get it via PostReplicatedAdd).
 	HandleEquipped(EquipmentList.Entries.Last());
+
+	// An item can be equipped already worn (picked up damaged, stowed while Critical), so the
+	// band it is in has to be applied on the way in, not only when the next stat write lands.
+	RefreshConditionPenalty(SlotTag);
 	return true;
 }
 
@@ -449,6 +614,9 @@ bool UDaEquipmentManagerComponent::Internal_UnequipSlot(FGameplayTag SlotTag)
 	{
 		AbilityToItemMap.Remove(Handle);
 	}
+	// The penalty belongs to the item, not to the wearer: it comes off with the item, otherwise
+	// the next item in this slot would inherit the previous one's Worn/Critical tag.
+	ClearConditionPenalty(Removed.SlotTag);
 	if (UDaAbilitySystemComponent* ASC = ResolveASC())
 	{
 		Removed.GrantedHandles.TakeFromAbilitySystem(ASC);

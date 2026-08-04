@@ -51,6 +51,8 @@ struct GAMEPLAYFRAMEWORK_API FDaConditionConfig
 {
 	GENERATED_BODY()
 
+	FDaConditionConfig();
+
 	/** Master switch. Items with this off never gain, decay or repair Condition. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition")
 	bool bUsesCondition = false;
@@ -79,7 +81,11 @@ struct GAMEPLAYFRAMEWORK_API FDaConditionConfig
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0", ClampMax="100"))
 	int32 CriticalThresholdPct = 25;
 
-	/** Penalty effects for the two worn bands. Defaults are set with the threshold watcher. */
+	/** Penalty effects for the two worn bands, applied to the item owner's ASC by
+	 *  UDaEquipmentManagerComponent. Default to the framework's tag-only effects
+	 *  (UDaGameplayEffect_Condition{Worn,Critical}); clear one to disable that band, or point it
+	 *  at a subclass that carries real modifiers. Set in the constructor, since the defaults are
+	 *  concrete classes this header deliberately does not include. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition")
 	TSubclassOf<UGameplayEffect> WornEffect;
 
