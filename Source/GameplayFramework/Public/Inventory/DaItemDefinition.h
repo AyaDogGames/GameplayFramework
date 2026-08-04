@@ -7,10 +7,31 @@
 #include "Engine/DataAsset.h"
 #include "DaItemDefinition.generated.h"
 
+class AActor;
 class ADaItemActor;
 class UDaAbilitySet;
 class UTexture2D;
 class UStaticMesh;
+
+/**
+ * FDaEquipmentActorToSpawn
+ * One actor to spawn+attach while an item is equipped. The spawned actor is THE
+ * Blueprint extension point for per-equip behavior (visuals, anim, audio).
+ */
+USTRUCT(BlueprintType)
+struct FDaEquipmentActorToSpawn
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, Category="Equipment")
+	TSoftClassPtr<AActor> ActorToSpawn;
+
+	UPROPERTY(EditDefaultsOnly, Category="Equipment")
+	FName AttachSocket;
+
+	UPROPERTY(EditDefaultsOnly, Category="Equipment")
+	FTransform AttachTransform;
+};
 
 /**
  * UDaItemDefinition
@@ -82,6 +103,12 @@ public:
 	/** Tags describing which equipment slot(s) this item can occupy. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Equipment")
 	FGameplayTagContainer EquipSlotTags;
+
+	// ----- Equipment actors -----
+
+	/** Actor spawned and attached while this item is equipped (weapon mesh, effect rig, ...). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Equipment")
+	TArray<FDaEquipmentActorToSpawn> ActorsToSpawn;
 
 	// ----- Primary Asset Id -----
 
