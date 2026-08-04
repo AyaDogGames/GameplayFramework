@@ -7,6 +7,7 @@
 #include "AbilitySystem/DaAbilitySet.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
 #include "Components/SphereComponent.h"
+#include "GameplayFramework.h"
 #include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -49,16 +50,38 @@ void ADaItemActor::AddToInventory_Implementation(APawn* InstigatorPawn, bool bDe
 		return;
 
 	APlayerState* PS = InstigatorPawn->GetPlayerState();
-	if (PS)
+	if (!PS)
 	{
-		UDaInventoryComponent* InvComp = UDaInventoryComponent::GetInventoryFromActor(PS);
-		if (InvComp && InvComp->AddItem(ItemDefinitionID))
+		return;
+	}
+
+	UDaInventoryComponent* InvComp = UDaInventoryComponent::GetInventoryFromActor(PS);
+	if (!InvComp)
+	{
+		return;
+	}
+
+	// A dropped item carries its own entry, so picking it back up returns the very same instance
+	// (ItemID, stats, tags) rather than a fresh one. Only the authority holds a snapshot.
+	bool bAdded = false;
+	if (bHasDroppedSnapshot && HasAuthority())
+	{
+		bAdded = InvComp->RestoreEntry(DroppedEntrySnapshot);
+		if (!bAdded)
 		{
-			if (bDestroyActor && HasAuthority())
-			{
-				Destroy();
-			}
+			LOG_WARNING("AddToInventory: restoring dropped item %s failed — falling back to a new instance",
+				*DroppedEntrySnapshot.ItemID.ToString());
 		}
+	}
+
+	if (!bAdded)
+	{
+		bAdded = InvComp->AddItem(ItemDefinitionID);
+	}
+
+	if (bAdded && bDestroyActor && HasAuthority())
+	{
+		Destroy();
 	}
 }
 
@@ -119,6 +142,13 @@ void ADaItemActor::InitializeDroppedItem(const FPrimaryAssetId& InItemDefinition
 	{
 		MeshComp->SetStaticMesh(DisplayMesh);
 	}
+}
+
+void ADaItemActor::InitializeDroppedItem(const FDaInventoryEntry& SourceEntry, UStaticMesh* DisplayMesh)
+{
+	InitializeDroppedItem(SourceEntry.ItemDefinitionID, DisplayMesh);
+	DroppedEntrySnapshot = SourceEntry;
+	bHasDroppedSnapshot = SourceEntry.IsValid();
 }
 
 void ADaItemActor::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const

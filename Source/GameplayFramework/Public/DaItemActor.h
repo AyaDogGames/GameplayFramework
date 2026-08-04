@@ -7,6 +7,7 @@
 #include "DaInteractableInterface.h"
 #include "GameplayTagContainer.h"
 #include "GameFramework/Actor.h"
+#include "Inventory/DaInventoryEntry.h"
 #include "Inventory/DaInventoryItemInterface.h"
 #include "DaItemActor.generated.h"
 
@@ -42,6 +43,13 @@ public:
 	/** Set up an actor spawned for a dropped inventory item (server, before FinishSpawning). */
 	void InitializeDroppedItem(const FPrimaryAssetId& InItemDefinitionID, UStaticMesh* DisplayMesh);
 
+	/**
+	 * Same, for a drop that must survive as the SAME item instance: keeps a snapshot of the entry
+	 * that left the inventory, so picking this actor back up restores its ItemID and stats instead
+	 * of minting a new instance.
+	 */
+	void InitializeDroppedItem(const FDaInventoryEntry& SourceEntry, UStaticMesh* DisplayMesh);
+
 protected:
 
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category="Components")
@@ -71,6 +79,17 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category="InventoryItems")
 	bool bHighlighted = false;
+
+	/**
+	 * The inventory entry this actor was dropped from, kept verbatim so a re-pickup restores the
+	 * same instance. Server-only by design: NOT a UPROPERTY, so it neither replicates nor
+	 * serializes. A client's cosmetic copy of the actor therefore has no snapshot, and a
+	 * hand-placed pickup never has one either — both take the definition-based AddItem path.
+	 */
+	FDaInventoryEntry DroppedEntrySnapshot;
+
+	/** True once InitializeDroppedItem stored a snapshot (authority only, see above). */
+	bool bHasDroppedSnapshot = false;
 
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;

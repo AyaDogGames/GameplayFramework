@@ -152,6 +152,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inventory|Persistence")
 	void LoadInventory(const TArray<FDaInventoryEntry>& SavedEntries);
 
+	/**
+	 * Server-only. Put a single previously-removed entry back, keeping it the SAME instance:
+	 * ItemID, StatTags, Tags, AbilitySetID and StackCount are copied verbatim (LoadInventory's
+	 * discipline, one entry at a time). Used by a dropped ADaItemActor on re-pickup.
+	 * Fails when the entry has no ItemID, when this inventory already holds that ItemID
+	 * (an instance cannot exist twice), or when there is no free slot. The entry lands in its
+	 * saved SlotIndex if that slot is free, otherwise in the first free slot.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Persistence")
+	bool RestoreEntry(const FDaInventoryEntry& SavedEntry);
+
 	// ----- Static helpers -----
 
 	/** Find the inventory component on the given actor. */

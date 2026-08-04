@@ -339,6 +339,48 @@ void UDaInventoryComponent::LoadInventory(const TArray<FDaInventoryEntry>& Saved
 	}
 }
 
+bool UDaInventoryComponent::RestoreEntry(const FDaInventoryEntry& SavedEntry)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		LOG_WARNING("RestoreEntry called on non-authority. Ignoring.");
+		return false;
+	}
+
+	if (!SavedEntry.IsValid())
+	{
+		LOG_WARNING("RestoreEntry: entry carries no ItemID — nothing to restore");
+		return false;
+	}
+
+	// One instance, one place: restoring an ItemID this inventory already holds would give the
+	// same item two entries, and every lookup by identity would then be ambiguous.
+	if (FindEntryByItemID(SavedEntry.ItemID))
+	{
+		LOG_WARNING("RestoreEntry: item %s is already in this inventory", *SavedEntry.ItemID.ToString());
+		return false;
+	}
+
+	int32 TargetSlot = SavedEntry.SlotIndex;
+	if (TargetSlot < 0 || TargetSlot >= MaxSlots || InventoryList.FindBySlot(TargetSlot) != nullptr)
+	{
+		TargetSlot = InventoryList.FindFirstEmptySlot(MaxSlots);
+	}
+
+	if (TargetSlot == INDEX_NONE)
+	{
+		LOG_WARNING("RestoreEntry: inventory full (MaxSlots=%d), cannot restore item %s", MaxSlots, *SavedEntry.ItemID.ToString());
+		return false;
+	}
+
+	// Verbatim copy apart from the slot: AddEntry rebuilds the stat accelerator and fires the
+	// added-broadcast, exactly as it does for save-loaded entries.
+	FDaInventoryEntry Restored = SavedEntry;
+	Restored.SlotIndex = TargetSlot;
+	InventoryList.AddEntry(Restored);
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Static helpers
 // ---------------------------------------------------------------------------
@@ -736,7 +778,18 @@ bool UDaInventoryComponent::Internal_DropItem(int32 SlotIndex, int32 Count)
 	// A single pickup actor represents the whole dropped stack
 	if (ADaItemActor* Pickup = GetWorld()->SpawnActorDeferred<ADaItemActor>(PickupClass, SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn))
 	{
-		Pickup->InitializeDroppedItem(DroppedEntry.ItemDefinitionID, Def->DisplayMesh.LoadSynchronous());
+		if (DropCount >= DroppedEntry.StackCount)
+		{
+			// The instance left the inventory whole, so hand the actor its entry: picking it back
+			// up restores this same item, per-instance stats and all.
+			Pickup->InitializeDroppedItem(DroppedEntry, Def->DisplayMesh.LoadSynchronous());
+		}
+		else
+		{
+			// A partial stack leaves the original entry (and its ItemID) behind in the inventory,
+			// so what hits the ground is a new instance and gets a fresh ID on pickup.
+			Pickup->InitializeDroppedItem(DroppedEntry.ItemDefinitionID, Def->DisplayMesh.LoadSynchronous());
+		}
 		Pickup->FinishSpawning(SpawnTransform);
 	}
 
