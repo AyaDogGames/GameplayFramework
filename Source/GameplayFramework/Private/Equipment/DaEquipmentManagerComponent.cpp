@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerState.h"
 #include "GameplayFramework.h"
 #include "Net/UnrealNetwork.h"
+#include "Abilities/GameplayAbility.h"
 #include "AbilitySystem/DaAbilitySet.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
 #include "Inventory/DaInventoryComponent.h"
@@ -32,6 +33,7 @@ void UDaEquipmentManagerComponent::BeginPlay()
 	EquipmentList.OwnerComponent = this; // belt and braces; the constructor already set it
 
 	EnsureInventoryBinding();
+	EnsureAbilityDecayBinding();
 }
 
 void UDaEquipmentManagerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -45,6 +47,14 @@ void UDaEquipmentManagerComponent::EndPlay(const EEndPlayReason::Type EndPlayRea
 		Inventory->OnEntryRemoved.RemoveDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
 	}
 	BoundInventory.Reset();
+
+	// The ASC outlives this pawn (it sits on the PlayerState), so the callback has to come off.
+	if (UDaAbilitySystemComponent* ASC = BoundASC.Get())
+	{
+		ASC->AbilityActivatedCallbacks.Remove(AbilityActivatedHandle);
+	}
+	BoundASC.Reset();
+	AbilityActivatedHandle.Reset();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -85,6 +95,72 @@ void UDaEquipmentManagerComponent::EnsureInventoryBinding()
 
 	Inventory->OnEntryRemoved.AddDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
 	BoundInventory = Inventory;
+}
+
+void UDaEquipmentManagerComponent::EnsureAbilityDecayBinding()
+{
+	if (GetOwnerRole() != ROLE_Authority || BoundASC.IsValid())
+	{
+		return;
+	}
+
+	UDaAbilitySystemComponent* ASC = ResolveASC();
+	if (!ASC)
+	{
+		// No PlayerState / ASC yet — ApplyLoadout and the equip path try again.
+		return;
+	}
+
+	// Ability ACTIVATION, not commit: the spec asked for the commit callback, but committing is
+	// per-ability opt-in (UGameplayAbility::CommitAbility, which Blueprint abilities authored
+	// without a Commit node never call), so a commit binding would silently never decay for
+	// most content. Activation fires exactly once per successful use, on the authority for
+	// client-initiated uses too, and only after CanActivateAbility has already checked
+	// cost/cooldown. Binding both would double-charge the framework's C++ abilities, which do commit.
+	AbilityActivatedHandle = ASC->AbilityActivatedCallbacks.AddUObject(
+		this, &UDaEquipmentManagerComponent::OnAbilityActivated);
+	BoundASC = ASC;
+}
+
+void UDaEquipmentManagerComponent::OnAbilityActivated(UGameplayAbility* Ability)
+{
+	if (!Ability || GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	// Only abilities this component granted map to an item; everything the player owns
+	// natively (and every non-instanced ability, whose spec handle is not per-activation)
+	// falls out here.
+	const FGuid ItemID = GetItemIDForAbility(Ability->GetCurrentAbilitySpecHandle());
+	if (!ItemID.IsValid())
+	{
+		return;
+	}
+
+	UDaInventoryComponent* Inventory = ResolveInventory();
+	if (!Inventory)
+	{
+		return;
+	}
+	const FDaInventoryEntry* Entry = Inventory->FindEntryByItemID(ItemID);
+	if (!Entry)
+	{
+		return;
+	}
+	// Copy before the stat write below reallocates the entry array.
+	const FPrimaryAssetId EntryDefinitionID = Entry->ItemDefinitionID;
+	Entry = nullptr;
+
+	const UDaItemDefinition* Def = ResolveItemDefinition(EntryDefinitionID);
+	if (!Def || !Def->ConditionConfig.bUsesCondition || Def->ConditionConfig.DecayPerUse <= 0)
+	{
+		return;
+	}
+
+	// The floor at 0 comes from the stat path's clamp.
+	Inventory->AddItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition,
+		-Def->ConditionConfig.DecayPerUse);
 }
 
 void UDaEquipmentManagerComponent::OnInventoryEntryRemoved(const FDaInventoryEntry& Entry, int32 SlotIndex)
@@ -136,8 +212,9 @@ void UDaEquipmentManagerComponent::ApplyLoadout()
 		return;
 	}
 
-	// Runs on possess, by which point the PlayerState (and its inventory) exists.
+	// Runs on possess, by which point the PlayerState (and its inventory + ASC) exists.
 	EnsureInventoryBinding();
+	EnsureAbilityDecayBinding();
 
 	UDaInventoryComponent* Inventory = ResolveInventory();
 	if (!Inventory)
@@ -184,6 +261,10 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 			*SlotTag.ToString(), *CoreGameplayTags::TAG_Equip_Slot.GetTag().ToString());
 		return false;
 	}
+
+	// An item can be equipped without ApplyLoadout ever running (a pickup equipped mid-game),
+	// and the decay hook has to be live before the first swing.
+	EnsureAbilityDecayBinding();
 
 	UDaInventoryComponent* Inventory = ResolveInventory();
 	if (!Inventory)

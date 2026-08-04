@@ -11,6 +11,7 @@
 class UDaAbilitySystemComponent;
 class UDaInventoryComponent;
 class UDaItemDefinition;
+class UGameplayAbility;
 struct FDaInventoryEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEquipmentEntryEvent, const FDaAppliedEquipmentEntry&, Entry);
@@ -115,6 +116,15 @@ private:
 	UFUNCTION()
 	void OnInventoryEntryRemoved(const FDaInventoryEntry& Entry, int32 SlotIndex);
 
+	/** Authority-only, idempotent: subscribe to the owner ASC's ability-activated callback so
+	 *  using an item's ability wears that item down. The ASC lives on the PlayerState, which
+	 *  BeginPlay can run without, so the equip path retries. */
+	void EnsureAbilityDecayBinding();
+
+	/** Bound to UAbilitySystemComponent::AbilityActivatedCallbacks on the authority: one use of
+	 *  an item-granted ability costs that item DecayPerUse Condition. */
+	void OnAbilityActivated(UGameplayAbility* Ability);
+
 	/** PlayerState (preferred) or owner inventory component. */
 	UDaInventoryComponent* ResolveInventory() const;
 	UDaAbilitySystemComponent* ResolveASC() const;
@@ -125,4 +135,8 @@ private:
 
 	/** Inventory whose OnEntryRemoved this component is currently bound to (authority only). */
 	TWeakObjectPtr<UDaInventoryComponent> BoundInventory;
+
+	/** ASC whose AbilityActivatedCallbacks this component is currently bound to (authority only). */
+	TWeakObjectPtr<UDaAbilitySystemComponent> BoundASC;
+	FDelegateHandle AbilityActivatedHandle;
 };

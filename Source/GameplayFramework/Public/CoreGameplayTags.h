@@ -48,6 +48,12 @@ namespace CoreGameplayTags
 	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat);
 	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat_Grade);
 	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat_Durability);
+	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat_Condition);
+
+	// Condition bands, applied to the owner's ASC by the equipment manager's penalty effects
+	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Condition);
+	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Condition_Worn);
+	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Condition_Critical);
 
 	// Equipment slots
 	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Equip_Slot);

@@ -650,6 +650,7 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 		}
 
 		InventoryList.AddEntry(NewEntry);
+		InitializeConditionStats(NewEntry.ItemID, *Def);
 		Remaining -= EntryCount;
 	}
 
@@ -857,6 +858,34 @@ bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayT
 
 	LOG_WARNING("Internal_SetItemStat: item %s not in inventory", *ItemID.ToString());
 	return false;
+}
+
+void UDaInventoryComponent::InitializeConditionStats(const FGuid& ItemID, const UDaItemDefinition& Def)
+{
+	const FDaConditionConfig& Config = Def.ConditionConfig;
+	if (!Config.bUsesCondition)
+	{
+		return;
+	}
+
+	// Already worn in: this instance came from somewhere that owns its own stats.
+	if (GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
+	{
+		return;
+	}
+
+	// A stat count of 0 is how "absent" is stored (SetStatCount(0) removes the tag), so a
+	// grade of 0 and no grade at all read the same here — both take the definition's default.
+	int32 Grade = GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade);
+	if (Grade <= 0)
+	{
+		Grade = FMath::Clamp(Config.DefaultGrade, 0, 10);
+		Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade, Grade);
+	}
+
+	// Items enter play at full condition; both writes go through the stat path, so each one
+	// validates, marks the entry dirty and broadcasts changed for the UI.
+	Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition, Config.GetConditionCap(Grade));
 }
 
 // ---------------------------------------------------------------------------

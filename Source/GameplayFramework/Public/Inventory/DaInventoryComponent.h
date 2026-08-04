@@ -269,6 +269,11 @@ private:
 	/** Server-only: find entry, mutate stat, mark dirty, broadcast changed. */
 	bool Internal_SetItemStat(const FGuid& ItemID, FGameplayTag StatTag, int32 Count);
 
+	/** Server-only: stamp Grade + full Condition on a freshly created entry whose definition
+	 *  uses condition. Only the acquisition path calls this — RestoreEntry and LoadInventory
+	 *  carry their own stats and must never be re-initialised (that would repair for free). */
+	void InitializeConditionStats(const FGuid& ItemID, const class UDaItemDefinition& Def);
+
 	/** Server-only: assign, reassign or clear one loadout slot. */
 	bool Internal_SetLoadoutSlot(FGameplayTag SlotTag, const FGuid& ItemID);
 

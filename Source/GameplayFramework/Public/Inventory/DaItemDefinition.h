@@ -10,6 +10,7 @@
 class AActor;
 class ADaItemActor;
 class UDaAbilitySet;
+class UGameplayEffect;
 class UTexture2D;
 class UStaticMesh;
 
@@ -31,6 +32,72 @@ struct GAMEPLAYFRAMEWORK_API FDaEquipmentActorToSpawn
 
 	UPROPERTY(EditDefaultsOnly, Category="Equipment")
 	FTransform AttachTransform;
+};
+
+/**
+ * FDaConditionConfig
+ *
+ * Opt-in wear model for one item type. Disabled by default, so existing content is
+ * untouched: an item only gains an Item.Stat.Condition (and only ever decays) when its
+ * definition sets bUsesCondition.
+ *
+ * Condition is stored as a StatTags count on the inventory entry, which makes it an int32
+ * (the spec's float DecayPerUse ships as an integer for that reason). It runs from 0 to a
+ * grade-derived cap; Grade itself is permanent provenance and is never mutated here.
+ * All numbers are tunable content defaults, not contract.
+ */
+USTRUCT(BlueprintType)
+struct GAMEPLAYFRAMEWORK_API FDaConditionConfig
+{
+	GENERATED_BODY()
+
+	/** Master switch. Items with this off never gain, decay or repair Condition. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition")
+	bool bUsesCondition = false;
+
+	/** Condition lost per ability use (see UDaEquipmentManagerComponent's decay hook). 0 disables decay. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0"))
+	int32 DecayPerUse = 1;
+
+	/** Cap = CapBase + CapPerGrade * Grade (grade 10 -> 100 with the shipped defaults). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition")
+	int32 CapBase = 60;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition")
+	int32 CapPerGrade = 4;
+
+	/** Grade stamped at acquisition when nothing else set Item.Stat.Grade on the instance
+	 *  (a spawner or loot table that seeds Grade before the item is added wins over this). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0", ClampMax="10"))
+	int32 DefaultGrade = 5;
+
+	/** Percent of the cap below which WornEffect applies. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0", ClampMax="100"))
+	int32 WornThresholdPct = 50;
+
+	/** Percent of the cap below which CriticalEffect applies (replacing WornEffect). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0", ClampMax="100"))
+	int32 CriticalThresholdPct = 25;
+
+	/** Penalty effects for the two worn bands. Defaults are set with the threshold watcher. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition")
+	TSubclassOf<UGameplayEffect> WornEffect;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition")
+	TSubclassOf<UGameplayEffect> CriticalEffect;
+
+	/** Repair cost = Points * RepairCreditsPerPoint * (1 + Grade * RepairGradeCostScale). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0"))
+	float RepairCreditsPerPoint = 2.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0"))
+	float RepairGradeCostScale = 0.1f;
+
+	/** Highest Condition this instance can hold, given its permanent Grade. */
+	int32 GetConditionCap(int32 Grade) const
+	{
+		return CapBase + CapPerGrade * FMath::Clamp(Grade, 0, 10);
+	}
 };
 
 /**
@@ -103,6 +170,12 @@ public:
 	/** Tags describing which equipment slot(s) this item can occupy. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Equipment")
 	FGameplayTagContainer EquipSlotTags;
+
+	// ----- Condition -----
+
+	/** Wear model for this item type (off by default; see FDaConditionConfig). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Condition")
+	FDaConditionConfig ConditionConfig;
 
 	// ----- Equipment actors -----
 
