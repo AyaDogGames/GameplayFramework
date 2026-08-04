@@ -126,6 +126,33 @@ public:
 	UFUNCTION(BlueprintPure, Category="Inventory|Stats")
 	static int32 GetItemSeed(FGuid ItemID);
 
+	// ----- Condition repair (the credits sink; see FDaConditionConfig) -----
+
+	/**
+	 * Spend the owning player's credits to raise this item's Item.Stat.Condition.
+	 * Points = 0 buys as many points as the player can afford, up to the item's grade-derived cap;
+	 * an explicit Points is clamped to what is missing and is REJECTED outright when the player
+	 * cannot afford all of it (a partial charge for an explicit order would be a surprise).
+	 * Cost = ceil(Points * RepairCreditsPerPoint * (1 + Grade * RepairGradeCostScale)), charged
+	 * against ADaPlayerState::AdjustCredits. Grade is provenance and never changes.
+	 * Routes to server if called on client (optimistic true; the server validates and may refuse).
+	 */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Condition")
+	bool RepairItem(FGuid ItemID, int32 Points = 0);
+
+	/**
+	 * Credit cost of buying Points condition points for this item, 0 when the item cannot be
+	 * repaired (unknown, not a condition user) or Points <= 0. UI-facing: same arithmetic the
+	 * server charges, so a shop can price a repair before ordering one.
+	 */
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	int32 GetRepairCost(FGuid ItemID, int32 Points) const;
+
+	/** How many condition points this item is missing (cap - current); 0 when it is at the cap
+	 *  or does not use condition. */
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	int32 GetMissingCondition(FGuid ItemID) const;
+
 	// ----- Loadout (which item the player wants in which Equip.Slot.*) -----
 	// Lives here (PlayerState side) so it survives pawn death and rides the save file.
 	// The pawn's UDaEquipmentManagerComponent applies it on possess.
@@ -247,6 +274,9 @@ private:
 	UFUNCTION(Server, Reliable)
 	void Server_SetLoadoutSlot(FGameplayTag SlotTag, FGuid ItemID);
 
+	UFUNCTION(Server, Reliable)
+	void Server_RepairItem(FGuid ItemID, int32 Points);
+
 	// ----- Client notifications (run on the owning client; locally on standalone/listen host) -----
 
 	UFUNCTION(Client, Reliable)
@@ -273,6 +303,19 @@ private:
 	 *  uses condition. Only the acquisition path calls this — RestoreEntry and LoadInventory
 	 *  carry their own stats and must never be re-initialised (that would repair for free). */
 	void InitializeConditionStats(const FGuid& ItemID, const class UDaItemDefinition& Def);
+
+	/** Server-only: validate, charge the owner's credits, then raise Condition through the stat
+	 *  path (so the equipment manager's threshold watcher clears penalty bands on its own). */
+	bool Internal_RepairItem(const FGuid& ItemID, int32 Points);
+
+	/** Definition of the item with this ItemID, but only when the item is in this inventory AND
+	 *  its definition opts into condition; nullptr otherwise. The one gate every condition
+	 *  query and the repair path share, so they can never disagree about what is repairable. */
+	const class UDaItemDefinition* ResolveConditionDefinition(const FGuid& ItemID) const;
+
+	/** The ADaPlayerState whose credits pay for repairs: our owner when the inventory lives on a
+	 *  PlayerState (the normal case), else the owning pawn's PlayerState. */
+	class ADaPlayerState* ResolveOwnerPlayerState() const;
 
 	/** Server-only: assign, reassign or clear one loadout slot. */
 	bool Internal_SetLoadoutSlot(FGameplayTag SlotTag, const FGuid& ItemID);

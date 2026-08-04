@@ -6,8 +6,10 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "CoreGameplayTags.h"
 #include "DaItemActor.h"
+#include "DaPlayerState.h"
 #include "GameplayFramework.h"
 #include "Engine/AssetManager.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryItemBase.h"
 #include "Inventory/DaInventoryList.h"
@@ -20,6 +22,30 @@ namespace
 	// entry's stat array or the loadout without limit.
 	constexpr int32 MaxStatTagsPerEntry = 32;
 	constexpr int32 MaxLoadoutEntries = 16;
+
+	/**
+	 * Slack on the repair cost before rounding up. The cost curve is authored as floats, so a
+	 * price whose exact arithmetic is a whole number of credits usually is not: grade 7 at the
+	 * shipped defaults gives 2 * (1 + 7 * 0.1f) = 3.40000002086..., and 20 points of that ceils
+	 * to 69 credits instead of the 68 the content author priced. A thousandth of a credit is not
+	 * a real cost, so it is charged as zero.
+	 */
+	constexpr double RepairCostEpsilon = 1.e-3;
+
+	/** Credits for Points condition points on an item of this grade. Single source of truth for
+	 *  the price: quoting (GetRepairCost) and charging (Internal_RepairItem) both come here. */
+	int32 RepairCostFor(const FDaConditionConfig& Config, int32 Grade, int32 Points)
+	{
+		if (Points <= 0)
+		{
+			return 0;
+		}
+
+		const double PerPoint = static_cast<double>(Config.RepairCreditsPerPoint)
+			* (1.0 + static_cast<double>(Grade) * static_cast<double>(Config.RepairGradeCostScale));
+
+		return FMath::Max(0, FMath::CeilToInt(static_cast<double>(Points) * PerPoint - RepairCostEpsilon));
+	}
 }
 
 UDaInventoryComponent::UDaInventoryComponent()
@@ -259,6 +285,47 @@ int32 UDaInventoryComponent::GetItemStat(FGuid ItemID, FGameplayTag StatTag) con
 int32 UDaInventoryComponent::GetItemSeed(FGuid ItemID)
 {
 	return static_cast<int32>(GetTypeHash(ItemID));
+}
+
+// ---------------------------------------------------------------------------
+// Condition repair
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::RepairItem(FGuid ItemID, int32 Points)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		// Client: route to server RPC (optimistic return; the server prices and validates).
+		Server_RepairItem(ItemID, Points);
+		return true;
+	}
+
+	return Internal_RepairItem(ItemID, Points);
+}
+
+int32 UDaInventoryComponent::GetRepairCost(FGuid ItemID, int32 Points) const
+{
+	const UDaItemDefinition* Def = ResolveConditionDefinition(ItemID);
+	if (!Def)
+	{
+		return 0;
+	}
+
+	const int32 Grade = FMath::Clamp(GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade), 0, 10);
+	return RepairCostFor(Def->ConditionConfig, Grade, Points);
+}
+
+int32 UDaInventoryComponent::GetMissingCondition(FGuid ItemID) const
+{
+	const UDaItemDefinition* Def = ResolveConditionDefinition(ItemID);
+	if (!Def)
+	{
+		return 0;
+	}
+
+	const int32 Grade = FMath::Clamp(GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade), 0, 10);
+	const int32 Cap = Def->ConditionConfig.GetConditionCap(Grade);
+	return FMath::Max(0, Cap - GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition));
 }
 
 // ---------------------------------------------------------------------------
@@ -512,6 +579,14 @@ void UDaInventoryComponent::Server_SetLoadoutSlot_Implementation(FGameplayTag Sl
 	if (!Internal_SetLoadoutSlot(SlotTag, ItemID))
 	{
 		LOG_WARNING("Server_SetLoadoutSlot failed for slot %s item %s", *SlotTag.ToString(), *ItemID.ToString());
+	}
+}
+
+void UDaInventoryComponent::Server_RepairItem_Implementation(FGuid ItemID, int32 Points)
+{
+	if (!Internal_RepairItem(ItemID, Points))
+	{
+		LOG_WARNING("Server_RepairItem failed for item %s points %d", *ItemID.ToString(), Points);
 	}
 }
 
@@ -888,6 +963,104 @@ void UDaInventoryComponent::InitializeConditionStats(const FGuid& ItemID, const 
 	Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition, Config.GetConditionCap(Grade));
 }
 
+bool UDaInventoryComponent::Internal_RepairItem(const FGuid& ItemID, int32 Points)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return false;
+	}
+
+	// Clients reach this through Server_RepairItem, so Points is untrusted: a negative order
+	// would otherwise pay the player credits for wearing the item down.
+	if (Points < 0)
+	{
+		LOG_WARNING("Internal_RepairItem: negative Points %d for item %s", Points, *ItemID.ToString());
+		return false;
+	}
+
+	const UDaItemDefinition* Def = ResolveConditionDefinition(ItemID);
+	if (!Def)
+	{
+		LOG_WARNING("Internal_RepairItem: item %s is not in this inventory, or does not use condition", *ItemID.ToString());
+		return false;
+	}
+
+	const FDaConditionConfig& Config = Def->ConditionConfig;
+	const int32 Grade = FMath::Clamp(GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade), 0, 10);
+	const int32 Cap = Config.GetConditionCap(Grade);
+	const int32 Current = GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition);
+	const int32 Missing = Cap - Current;
+	if (Missing <= 0)
+	{
+		LOG_WARNING("Internal_RepairItem: item %s is already at its grade-%d cap (%d)", *ItemID.ToString(), Grade, Cap);
+		return false;
+	}
+
+	ADaPlayerState* PlayerState = ResolveOwnerPlayerState();
+	if (!PlayerState)
+	{
+		LOG_WARNING("Internal_RepairItem: no ADaPlayerState owns %s — nothing to charge the repair to", *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	const int32 Credits = PlayerState->GetCredits();
+	int32 Buying = 0;
+	if (Points > 0)
+	{
+		// Explicit order: clamp to what is actually missing (never overshoot the cap, never charge
+		// for points the item cannot hold), then take it or leave it.
+		Buying = FMath::Min(Points, Missing);
+		if (RepairCostFor(Config, Grade, Buying) > Credits)
+		{
+			LOG_WARNING("Internal_RepairItem: item %s repair of %d point(s) costs %d credits, player has %d — rejected",
+				*ItemID.ToString(), Buying, RepairCostFor(Config, Grade, Buying), Credits);
+			return false;
+		}
+	}
+	else
+	{
+		// Points == 0: buy as much as the purse allows. The division only seeds the search —
+		// RepairCostFor is the authority on the price, so the two can never disagree by a credit.
+		const double PerPoint = static_cast<double>(Config.RepairCreditsPerPoint)
+			* (1.0 + static_cast<double>(Grade) * static_cast<double>(Config.RepairGradeCostScale));
+		Buying = PerPoint > 0.0
+			? FMath::Clamp(FMath::FloorToInt(static_cast<double>(Credits) / PerPoint), 0, Missing)
+			: Missing;
+		while (Buying < Missing && RepairCostFor(Config, Grade, Buying + 1) <= Credits)
+		{
+			++Buying;
+		}
+		while (Buying > 0 && RepairCostFor(Config, Grade, Buying) > Credits)
+		{
+			--Buying;
+		}
+
+		if (Buying <= 0)
+		{
+			LOG_WARNING("Internal_RepairItem: item %s needs %d credits for a single point, player has %d",
+				*ItemID.ToString(), RepairCostFor(Config, Grade, 1), Credits);
+			return false;
+		}
+	}
+
+	const int32 Cost = RepairCostFor(Config, Grade, Buying);
+	PlayerState->AdjustCredits(-Cost);
+
+	// The stat path marks the entry dirty and broadcasts changed, which is what makes the
+	// equipment manager's threshold watcher drop the penalty band the repair just lifted.
+	if (!Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition, Current + Buying))
+	{
+		// Nothing above should let this happen; if it does, the player keeps their credits.
+		PlayerState->AdjustCredits(Cost);
+		LOG_WARNING("Internal_RepairItem: item %s stat write failed — refunded %d credits", *ItemID.ToString(), Cost);
+		return false;
+	}
+
+	LOG("Repaired item %s by %d point(s) to %d/%d for %d credits (grade %d)",
+		*ItemID.ToString(), Buying, Current + Buying, Cap, Cost, Grade);
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Internal loadout logic (server-only)
 // ---------------------------------------------------------------------------
@@ -992,6 +1165,36 @@ UDaItemDefinition* UDaInventoryComponent::ResolveItemDefinition(FPrimaryAssetId 
 		}
 	}
 	return Def;
+}
+
+const UDaItemDefinition* UDaInventoryComponent::ResolveConditionDefinition(const FGuid& ItemID) const
+{
+	const FDaInventoryEntry* Entry = ItemID.IsValid() ? FindEntryByItemID(ItemID) : nullptr;
+	if (!Entry)
+	{
+		return nullptr;
+	}
+
+	const UDaItemDefinition* Def = ResolveItemDefinition(Entry->ItemDefinitionID);
+	return (Def && Def->ConditionConfig.bUsesCondition) ? Def : nullptr;
+}
+
+ADaPlayerState* UDaInventoryComponent::ResolveOwnerPlayerState() const
+{
+	// Player inventories live on the PlayerState (ADaPlayerState::InventoryComp), which is also
+	// where the credits are, so this is the normal case.
+	if (ADaPlayerState* OwnerState = Cast<ADaPlayerState>(GetOwner()))
+	{
+		return OwnerState;
+	}
+
+	// An inventory placed directly on a pawn still charges that pawn's player, when it has one.
+	if (const APawn* Pawn = Cast<APawn>(GetOwner()))
+	{
+		return Cast<ADaPlayerState>(Pawn->GetPlayerState());
+	}
+
+	return nullptr;
 }
 
 AActor* UDaInventoryComponent::ResolveOwnerAvatar() const
