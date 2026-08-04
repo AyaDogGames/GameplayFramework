@@ -1,8 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// Copyright Dream Awake Solutions LLC
 
 #include "Inventory/DaInventoryItemInterface.h"
-
-
-// Add default functionality here for any IDaInventoryItemInterface functions that are not pure virtual.
-

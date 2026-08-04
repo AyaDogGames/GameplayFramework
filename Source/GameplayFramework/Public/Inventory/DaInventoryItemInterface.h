@@ -1,55 +1,32 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright Dream Awake Solutions LLC
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
 #include "UObject/Interface.h"
 #include "DaInventoryItemInterface.generated.h"
 
-class UDaAbilitySet;
-struct FDaInventoryItemData;
-
-// This class does not need to be modified.
 UINTERFACE(Blueprintable)
 class GAMEPLAYFRAMEWORK_API UDaInventoryItemInterface : public UInterface
 {
 	GENERATED_BODY()
 };
 
-/**
- * 
- */
 class GAMEPLAYFRAMEWORK_API IDaInventoryItemInterface
 {
 	GENERATED_BODY()
 
 public:
-	
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
-	FName GetItemName() const;
 
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
-	FName GetItemDescription() const;
+	// Returns the PrimaryAssetId of the UDaItemDefinition for this item
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Inventory")
+	FPrimaryAssetId GetItemDefinitionID() const;
 
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
-	int32 GetItemTags(FGameplayTagContainer& OutItemTags) const;
+	// How many of this item the pickup represents (default 1)
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Inventory")
+	int32 GetStackCount() const;
 
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
-	UTexture2D* GetItemThumbnail() const;
-	
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
-	UMaterialInterface* GetRenderTargetMaterial() const;
-
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
-	UStaticMeshComponent* GetMeshComponent() const;
-
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
-	UDaAbilitySet* GetAbilitySet() const;
-
-	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "InventoryItems")
-	void ItemAddedToInventory();
-
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "InventoryItems")
+	// Add this item to the instigator's inventory
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category="Inventory")
 	void AddToInventory(APawn* InstigatorPawn, bool bDestroyActor = true);
 };

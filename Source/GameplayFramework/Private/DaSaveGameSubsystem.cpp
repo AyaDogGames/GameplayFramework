@@ -152,8 +152,37 @@ bool UDaSaveGameSubsystem::OverrideSpawnTransform(AController* NewPlayer)
 	return false;
 }
 
+bool UDaSaveGameSubsystem::ReloadPlayerState(APlayerState* PlayerState)
+{
+	// Applying save data rewrites server-authoritative state (inventory, loadout, attributes).
+	// A client calling this would fight replication, so refuse outside the authority.
+	const UWorld* World = GetWorld();
+	if (World && World->GetNetMode() == NM_Client)
+	{
+		LOG_WARNING("ReloadPlayerState called on a client. Ignoring — save data is applied on the authority.");
+		return false;
+	}
+
+	ADaPlayerState* PS = Cast<ADaPlayerState>(PlayerState);
+	if (PS == nullptr || CurrentSaveGame == nullptr)
+	{
+		return false;
+	}
+
+	PS->LoadPlayerState(CurrentSaveGame);
+	return true;
+}
+
 void UDaSaveGameSubsystem::WriteSaveGame()
 {
+	if (CurrentSaveGame == nullptr)
+	{
+		// Nothing loaded or created yet (no slot name configured); callers that go through
+		// SaveInGameProgressData always have one by this point.
+		LOG("WriteSaveGame: no CurrentSaveGame to write into.");
+		return;
+	}
+
 	// Clear arrays, may contain data from previously loaded SaveGame
 	CurrentSaveGame->SavedPlayers.Empty();
 	CurrentSaveGame->SavedActors.Empty();

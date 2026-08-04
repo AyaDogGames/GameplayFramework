@@ -96,8 +96,7 @@ UDaStatMenuWidgetController* UDaAbilitySystemLibrary::GetStatMenuWidgetControlle
 	return nullptr;
 }
 
-UDaInventoryWidgetController* UDaAbilitySystemLibrary::GetInventoryMenuWidgetController(
-	const UObject* WorldContextObject)
+UDaInventoryWidgetController* UDaAbilitySystemLibrary::GetInventoryMenuWidgetController(const UObject* WorldContextObject)
 {
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
 	{
@@ -115,8 +114,7 @@ UDaInventoryWidgetController* UDaAbilitySystemLibrary::GetInventoryMenuWidgetCon
 	return nullptr;
 }
 
-UDaInventoryWidgetController* UDaAbilitySystemLibrary::GetInventoryMenuWidgetControllerForActor(
-	const UObject* WorldContextObject, AActor* Actor)
+UDaInventoryWidgetController* UDaAbilitySystemLibrary::GetInventoryMenuWidgetControllerForActor(const UObject* WorldContextObject, AActor* Actor)
 {
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
 	{
@@ -133,3 +131,4 @@ UDaInventoryWidgetController* UDaAbilitySystemLibrary::GetInventoryMenuWidgetCon
 	}
 	return nullptr;
 }
+

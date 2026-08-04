@@ -23,10 +23,12 @@ public:
 	UPROPERTY()
 	FName PlayerStartTag = FName();
 
-	UPROPERTY()
+	/* Save slot the game mode loads on InitGame and writes on autosave. Blueprint-writable so
+	 * slot selection (main menu, save/load screen) can set it before travel. */
+	UPROPERTY(BlueprintReadWrite, Category = "SaveGame")
 	FString LoadSlotName = FString();
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadWrite, Category = "SaveGame")
 	int32 LoadSlotIndex = 0;
 	
 };

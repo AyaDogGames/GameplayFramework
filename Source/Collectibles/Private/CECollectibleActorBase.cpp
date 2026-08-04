@@ -5,7 +5,7 @@
 #include "CoreGameplayTags.h"
 #include "DaCharacter.h"
 #include "DaInspectableComponent.h"
-#include "DaPlayerState.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "UI/DaCommonUIExtensions.h"
 
@@ -96,67 +96,25 @@ void ACECollectibleActorBase::SaveCollectible_Implementation(bool bSaveToDisk)
 }
 
 // IDaInventoryItemInterface Implementation
-FName ACECollectibleActorBase::GetItemName_Implementation() const
+FPrimaryAssetId ACECollectibleActorBase::GetItemDefinitionID_Implementation() const
 {
-	if (CollectibleData)
-	{
-		return CollectibleData->CollectibleDataRef.Name;
-	}
-	return FName();
-}
-
-FName ACECollectibleActorBase::GetItemDescription_Implementation() const
-{
-	if (CollectibleData)
-	{
-		return CollectibleData->CollectibleDataRef.Name;
-	}
-	return FName();
-}
-
-int32 ACECollectibleActorBase::GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const
-{
-	if (CollectibleData && CollectibleData->CollectibleDataRef.CoreTag.GetTagName().IsValid())
-	{
-		OutItemTags.AddTag(CollectibleData->CollectibleDataRef.CoreTag);
-	}
-	return OutItemTags.Num();
-}
-
-UTexture2D* ACECollectibleActorBase::GetItemThumbnail_Implementation() const
-{
-	if (CollectibleData)
-	{
-		return CollectibleData->GetIcon();
-	}
-	return nullptr;
-}
-
-UMaterialInterface* ACECollectibleActorBase::GetRenderTargetMaterial_Implementation() const
-{
-	return RenderTargetMaterial;
-}
-
-UStaticMeshComponent* ACECollectibleActorBase::GetMeshComponent_Implementation() const
-{
-	return PreviewMeshComp;
-}
-
-UDaAbilitySet* ACECollectibleActorBase::GetAbilitySet_Implementation() const
-{
-	// TODO: Implement getting ability set
-	return nullptr;
+	return ItemDefinitionID;
 }
 
 void ACECollectibleActorBase::AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor)
 {
-	if (APlayerState* PS = InstigatorPawn->GetPlayerState())
+	if (!InstigatorPawn)
+		return;
+
+	APlayerState* PS = InstigatorPawn->GetPlayerState();
+	if (PS)
 	{
-		if (UDaInventoryComponent* InventoryComponent = Cast<ADaPlayerState>(PS)->GetInventoryComponent())
+		UDaInventoryComponent* InvComp = UDaInventoryComponent::GetInventoryFromActor(PS);
+		if (InvComp && InvComp->AddItem(ItemDefinitionID))
 		{
-			if (InventoryComponent->AddItem(this))
+			if (bDestroyActor && HasAuthority())
 			{
-				Execute_ItemAddedToInventory(this);
+				Destroy();
 			}
 		}
 	}

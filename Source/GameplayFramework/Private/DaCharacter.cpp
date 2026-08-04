@@ -15,6 +15,7 @@
 #include "DaPlayerController.h"
 #include "DaSaveGame.h"
 #include "DaSaveGameSubsystem.h"
+#include "Equipment/DaEquipmentManagerComponent.h"
 #include "GameplayFramework.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/DaHUD.h"
@@ -50,7 +51,32 @@ void ADaCharacter::InitAbilitySystem()
 		// Attribute Component set in PlayerState after loading pawn data
 		Super::InitAbilitySystem();
 
+		// Re-apply the player's persistent loadout to this (possibly fresh) pawn. The
+		// loadout lives on the PlayerState's inventory, so it survives pawn death.
+		if (HasAuthority())
+		{
+			if (UDaEquipmentManagerComponent* Equipment = UDaEquipmentManagerComponent::GetEquipmentFromActor(this))
+			{
+				Equipment->ApplyLoadout();
+			}
+		}
 	}
+}
+
+void ADaCharacter::UnPossessed()
+{
+	// Revoke before the PlayerState link is torn down: the equipment grants live on the
+	// PlayerState's ASC, which the respawned pawn inherits, so leaving them here means the
+	// re-applied loadout stacks a second copy of every equipment ability.
+	if (HasAuthority())
+	{
+		if (UDaEquipmentManagerComponent* Equipment = UDaEquipmentManagerComponent::GetEquipmentFromActor(this))
+		{
+			Equipment->UnequipAll();
+		}
+	}
+
+	Super::UnPossessed();
 }
 
 void ADaCharacter::LoadProgress()

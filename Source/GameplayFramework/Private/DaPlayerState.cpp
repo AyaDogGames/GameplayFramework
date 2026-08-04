@@ -134,6 +134,22 @@ void ADaPlayerState::LoadPlayerState_Implementation(UDaSaveGame* SaveObject)
 		{
 			LOG("Could not find SaveGame data for player id '%i'.", GetPlayerId());
 		}
+
+		if (InventoryComp && FoundData)
+		{
+			InventoryComp->LoadInventory(FoundData->SavedInventory);
+
+			// After LoadInventory: SetLoadoutSlot only accepts items the inventory holds.
+			// Replace rather than merge, so a load wipes stale assignments.
+			for (const TPair<FGameplayTag, FGuid>& Existing : InventoryComp->GetLoadout())
+			{
+				InventoryComp->SetLoadoutSlot(Existing.Key, FGuid());
+			}
+			for (const FDaLoadoutEntry& Saved : FoundData->SavedLoadout)
+			{
+				InventoryComp->SetLoadoutSlot(Saved.SlotTag, Saved.ItemID);
+			}
+		}
 	}
 }
 
@@ -158,6 +174,19 @@ void ADaPlayerState::SavePlayerState_Implementation(UDaSaveGame* SaveObject)
 			SaveData.bResumeAtTransform = true;
 		}
 		
+		if (InventoryComp)
+		{
+			SaveData.SavedInventory = InventoryComp->SaveInventory();
+
+			SaveData.SavedLoadout.Reset();
+			for (const TPair<FGameplayTag, FGuid>& Pair : InventoryComp->GetLoadout())
+			{
+				FDaLoadoutEntry& Saved = SaveData.SavedLoadout.AddDefaulted_GetRef();
+				Saved.SlotTag = Pair.Key;
+				Saved.ItemID = Pair.Value;
+			}
+		}
+
 		SaveObject->SavedPlayers.Add(SaveData);
 	}
 }

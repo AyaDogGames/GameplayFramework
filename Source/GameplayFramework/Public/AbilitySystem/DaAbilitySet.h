@@ -98,6 +98,9 @@ public:
 
 	void TakeFromAbilitySystem(UDaAbilitySystemComponent* DaASC);
 
+	/** Granted ability specs, for callers that map handles back to their source (equipment). */
+	const TArray<FGameplayAbilitySpecHandle>& GetAbilitySpecHandles() const { return AbilitySpecHandles; }
+
 protected:
 
 	// Handles to the granted abilities.
@@ -131,12 +134,12 @@ public:
 
 	// Useful for keeping track or identifying this set later
 	FORCEINLINE FGameplayTag GetSetIdentityTag() const { return SetIdentityTag; }
-	
+
 protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "AbilitySet", meta=(TitleProperty=SetIdentityTag))
 	FGameplayTag SetIdentityTag;
-	
+
 	// Gameplay abilities to grant when this ability set is granted.
 	UPROPERTY(EditDefaultsOnly, Category = "Gameplay Abilities", meta=(TitleProperty=Ability))
 	TArray<FDaAbilitySet_GameplayAbility> GrantedGameplayAbilities;

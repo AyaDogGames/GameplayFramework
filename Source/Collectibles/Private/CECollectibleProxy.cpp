@@ -4,8 +4,7 @@
 #include "CECollectibleProxy.h"
 
 #include "CECollectibleData.h"
-#include "DaPlayerState.h"
-#include "CollectiblesGameplayTags.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 
 
@@ -23,22 +22,18 @@ UCECollectibleProxy* UCECollectibleProxy::CreateCollectibleProxyFromDataRef(cons
 	return CollectibleProxy;
 }
 
-int32 UCECollectibleProxy::GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const
-{
-	OutItemTags = FGameplayTagContainer(CollectiblesGameplayTags::TAG_InventoryTypeCollectibles);
-	return 1;
-}
-
 void UCECollectibleProxy::AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor)
 {
-	if (APlayerState* PS = InstigatorPawn->GetPlayerState())
+	if (!InstigatorPawn)
+		return;
+
+	APlayerState* PS = InstigatorPawn->GetPlayerState();
+	if (PS)
 	{
-		if (UDaInventoryComponent* InventoryComponent = Cast<ADaPlayerState>(PS)->GetInventoryComponent())
+		UDaInventoryComponent* InvComp = UDaInventoryComponent::GetInventoryFromActor(PS);
+		if (InvComp)
 		{
-			if (InventoryComponent->AddItem(this))
-			{
-				Execute_ItemAddedToInventory(this);
-			}
+			InvComp->AddItem(ItemDefinitionID);
 		}
 	}
 }

@@ -8,6 +8,7 @@
 
 class UMVVMViewModelBase;
 class UDaSaveGame;
+class APlayerState;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSaveGameSignature, class UDaSaveGame*, SaveObject);
 
@@ -42,7 +43,13 @@ public:
 	void WriteSaveGame();
 
 	// Load from disk, optional slot name
+	UFUNCTION(BlueprintCallable, Category="SaveGame")
 	void LoadSaveGame(FString InSlotName="", int32 InSlotIndex=0);
+
+	/** Re-apply the loaded save data to a live PlayerState (what HandleStartingNewPlayer does
+	 *  on possess). Exposed so a save/load round trip can be driven without a respawn. */
+	UFUNCTION(BlueprintCallable, Category="SaveGame")
+	bool ReloadPlayerState(APlayerState* PlayerState);
 
 	UPROPERTY(BlueprintAssignable)
 	FOnSaveGameSignature OnSaveGameLoaded;

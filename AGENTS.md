@@ -1,34 +1,12 @@
-# Codex Agent Guidelines
+# Agent Guidelines — GameplayFramework
 
-This repository contains the **GameplayFramework** plugin for Unreal Engine 5.5.
-The plugin provides a data-driven Gameplay Ability System and various utility
-classes (inventory, AI, UI widgets, etc.).  The repository does not contain
-automated tests.
+This repository is the **GameplayFramework** plugin for **Unreal Engine 5.8**: a data-driven, replicated Gameplay Ability System (GAS) framework with two Runtime modules (`GameplayFramework`, `Collectibles`) and no editor module. There is no automated test suite.
 
-Refer to `README.md` for detailed setup instructions on integrating the plugin
-into your Unreal project.
+**Canonical guide: see [`CLAUDE.md`](./CLAUDE.md).** It is the authoritative agent/contributor reference — module map, conventions, the shared-checkout gotcha, the FastArray inventory, build steps, and what does not exist. This file is only a pointer; do not duplicate that content here.
 
-## Repository Structure
+For human-facing setup and integration instructions, see [`README.md`](./README.md).
 
-- `GameplayFramework.uplugin` – plugin descriptor enabling required modules.
-- `Source/GameplayFramework/`
-  - `Public/` – header files. Subdirectories include:
-    - `AbilitySystem/` – gameplay abilities, attribute sets, effects,
-      modifiers and ability tasks.
-    - `AI/` – AI characters, controllers, and behaviour tree helpers.
-    - `Inventory/` – inventory components, item base classes, and factories.
-    - `UI/` – common UI widgets and widget controller classes.
-    - Additional headers for characters, game modes, projectiles and more.
-  - `Private/` – implementations mirroring the public layout.
-- `Content/` – example assets used by the plugin.
-- `Resources/` – plugin icon resources.
+Two things to internalize before editing:
 
-## Development Notes
-
-1. Add the plugin to the `Plugins/` folder of an Unreal 5.5 C++ project
-   (clone directly or as a git submodule).
-2. Run Unreal's `GenerateProjectFiles` script so the new module is detected.
-3. Build your project from your IDE or the Unreal Editor. The plugin will be
-   compiled along with the rest of the project.
-
-No automated test suite is provided.
+- This plugin is **one shared checkout** at `C:/Source/SharedPlugins/GameplayFramework` (not a submodule, not a symlink). Consumers discover it via `"AdditionalPluginDirectories": ["../SharedPlugins"]` in their `.uproject`; editing it affects every consumer. Commit plugin changes in this repo directly.
+- Engine is **UE 5.8**; inventory is the `FFastArraySerializer` system with a thin view-model UI adapter layer (the old UObject inventory model was deleted); there is no `GameplayFrameworkEditor` module. See `CLAUDE.md` for details.

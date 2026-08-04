@@ -2,33 +2,86 @@
 
 
 #include "Inventory/DaInventoryItemBase.h"
-#include "Inventory/DaInventoryComponent.h"
-#include "CoreGameplayTags.h"
-#include "Net/UnrealNetwork.h"
 
-// Create Static Array of Factories
-TArray<TScriptInterface<IDaInventoryItemFactory>> UDaInventoryItemBase::Factories;
+#include "CoreGameplayTags.h"
+#include "Engine/AssetManager.h"
+#include "Inventory/DaInventoryEntry.h"
+#include "Inventory/DaItemDefinition.h"
 
 UDaInventoryItemBase::UDaInventoryItemBase()
 {
-	// Initialize components only if needed
-	if (!HasAnyFlags(RF_ClassDefaultObject))
+}
+
+UDaInventoryItemBase* UDaInventoryItemBase::CreateFromEntry(const FDaInventoryEntry& Entry, UObject* Outer)
+{
+	UObject* OuterToUse = Outer ? Outer : (UObject*)GetTransientPackage();
+	UDaInventoryItemBase* NewItem = NewObject<UDaInventoryItemBase>(OuterToUse);
+
+	// Resolve the item definition from its primary asset id (loaded copy if present,
+	// otherwise synchronously load the asset path) — mirrors UDaInventoryComponent.
+	UDaItemDefinition* Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(Entry.ItemDefinitionID));
+	if (!Def)
 	{
-		NestedInventory = CreateDefaultSubobject<UDaInventoryComponent>(TEXT("NestedInventory"));
+		const FSoftObjectPath AssetPath = UAssetManager::Get().GetPrimaryAssetPath(Entry.ItemDefinitionID);
+		if (AssetPath.IsValid())
+		{
+			Def = Cast<UDaItemDefinition>(AssetPath.TryLoad());
+		}
+	}
+
+	NewItem->PopulateFromEntry(Entry, Def);
+	return NewItem;
+}
+
+UDaInventoryItemBase* UDaInventoryItemBase::CreateFromData(const FDaInventoryItemData& Data)
+{
+	TSubclassOf<UDaInventoryItemBase> ItemClass = Data.ItemClass;
+	if (!ItemClass)
+	{
+		ItemClass = UDaInventoryItemBase::StaticClass();
+	}
+	UDaInventoryItemBase* NewItem = NewObject<UDaInventoryItemBase>(GetTransientPackage(), ItemClass);
+	if (NewItem)
+	{
+		NewItem->bIsEmptySlot = false;
+		NewItem->PopulateWithData(Data);
+	}
+	return NewItem;
+}
+
+void UDaInventoryItemBase::PopulateFromEntry(const FDaInventoryEntry& Entry, UDaItemDefinition* Definition)
+{
+	bIsEmptySlot = !Entry.IsValid();
+	ItemID = Entry.ItemID;
+	ItemDefinitionID = Entry.ItemDefinitionID;
+	SlotIndex = Entry.SlotIndex;
+	StackCount = Entry.StackCount;
+	InventoryItemTags = Entry.Tags;
+
+	if (Definition)
+	{
+		Name = FName(*Definition->DisplayName.ToString());
+		Description = FName(*Definition->Description.ToString());
+		Icon = Definition->Icon;
+		AbilitySetToGrant = nullptr; // resolved on demand from the definition's soft ptr when needed
+		// Merge definition categorisation tags with any per-instance tags.
+		InventoryItemTags.AppendTags(Definition->ItemTags);
 	}
 }
 
-void UDaInventoryItemBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+void UDaInventoryItemBase::PopulateWithData(const FDaInventoryItemData& Data)
 {
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	InventoryItemTags = Data.Tags;
+	Name = Data.ItemName;
+	Description = Data.ItemDescription;
+	ItemID = Data.ItemID;
+	Icon = Data.Icon;
+	StackCount = Data.ItemCount;
 
-	DOREPLIFETIME(UDaInventoryItemBase, NestedInventory);
-	DOREPLIFETIME(UDaInventoryItemBase, bIsEmptySlot);
-	DOREPLIFETIME(UDaInventoryItemBase, Name);
-	DOREPLIFETIME(UDaInventoryItemBase, Description);
-	DOREPLIFETIME(UDaInventoryItemBase, ItemID);
-	DOREPLIFETIME(UDaInventoryItemBase, InventoryItemTags);
-	DOREPLIFETIME(UDaInventoryItemBase, SlotTags);
+	if (Data.AbilitySetToGrant)
+	{
+		AbilitySetToGrant = Data.AbilitySetToGrant;
+	}
 }
 
 FDaInventoryItemData UDaInventoryItemBase::ToData() const
@@ -39,9 +92,9 @@ FDaInventoryItemData UDaInventoryItemBase::ToData() const
 	Data.ItemDescription = Description;
 	Data.ItemID = ItemID;
 	Data.ItemClass = GetClass();
-	Data.NestedInventorySize = NestedInventory ? NestedInventory->GetMaxSize() : 0;
+	Data.Icon = Icon;
 	Data.AbilitySetToGrant = AbilitySetToGrant;
-	Data.ThumbnailBrush = ThumbnailBrush;
+	Data.ItemCount = StackCount;
 	return Data;
 }
 
@@ -49,49 +102,20 @@ void UDaInventoryItemBase::ClearData()
 {
 	bIsEmptySlot = true;
 	InventoryItemTags = FGameplayTagContainer();
-	NestedInventory = nullptr;
 	AbilitySetToGrant = nullptr;
+	Icon = nullptr;
 	ThumbnailBrush = nullptr;
 	Name = FName();
 	Description = FName();
 	ItemID = FGuid();
+	ItemDefinitionID = FPrimaryAssetId();
+	SlotIndex = INDEX_NONE;
+	StackCount = 1;
 }
 
 FGameplayTag UDaInventoryItemBase::GetType() const
 {
 	return GetSpecificTag(InventoryItemTags, CoreGameplayTags::InventoryItem_Type);
-}
-
-
-UDaInventoryItemBase* UDaInventoryItemBase::CreateFromData(const FDaInventoryItemData& Data)
-{
-	UDaInventoryItemBase* NewItem = NewObject<UDaInventoryItemBase>(GetTransientPackage(), Data.ItemClass);
-	if (NewItem)
-	{
-		NewItem->bIsEmptySlot = false;
-		NewItem->PopulateWithData(Data);
-	}
-	return NewItem;
-}
-
-void UDaInventoryItemBase::PopulateWithData(const FDaInventoryItemData& Data)
-{
-	InventoryItemTags = Data.Tags;
-	Name = Data.ItemName;
-	Description = Data.ItemDescription;
-	ItemID = Data.ItemID;
-	
-	if (Data.ThumbnailBrush)
-	{
-		ThumbnailBrush = Data.ThumbnailBrush;
-	}
-
-	if (Data.AbilitySetToGrant)
-	{
-		AbilitySetToGrant = Data.AbilitySetToGrant;
-	}
-
-	// TODO: CreateNestedInventory( Data.NestedInventorySize );
 }
 
 bool UDaInventoryItemBase::CanMergeWith(const UDaInventoryItemBase* OtherItem) const
@@ -103,37 +127,4 @@ bool UDaInventoryItemBase::CanMergeWith(const UDaInventoryItemBase* OtherItem) c
 void UDaInventoryItemBase::MergeWith(UDaInventoryItemBase* OtherItem)
 {
 	// subclasses to implement if desired merging behavior
-}
-
-void UDaInventoryItemBase::ActivateEquipAbility()
-{
-	// Check for any variations of this tag
-	FGameplayTag ItemIDTag = GetSpecificTag(InventoryItemTags, CoreGameplayTags::InventoryItem_EquipAbility);
-	if (ItemIDTag.IsValid())
-	{
-		//TODO: Get ability from AbilitySet and Activate ... AbilitySystemComponent->TryActivateAbilitiesByTag(FGameplayTagContainer(ItemIDTag));
-		OnInventoryItemUpdated.Broadcast(this);
-	}
-}
-
-void UDaInventoryItemBase::EndEquipAbility()
-{
-	// Check for any variations of this tag
-	FGameplayTag ItemIDTag = GetSpecificTag(InventoryItemTags, CoreGameplayTags::InventoryItem_EquipAbility);
-	if (ItemIDTag.IsValid())
-	{
-		//TODO: End any activated abilities
-		OnInventoryItemUpdated.Broadcast(this);
-	}
-}
-
-void UDaInventoryItemBase::OnRep_NestedInventory_Implementation()
-{
-	//Notify/Update UI
-	//OnInventoryItemUpdated.Broadcast(this);
-}
-
-UDaInventoryComponent* UDaInventoryItemBase::GetNestedInventory() const
-{
-	return NestedInventory;
 }

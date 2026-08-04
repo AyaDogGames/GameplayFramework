@@ -4,10 +4,10 @@
 #include "DaItemActor.h"
 
 #include "AbilitySystemComponent.h"
-#include "DaPlayerState.h"
 #include "AbilitySystem/DaAbilitySet.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
 #include "Components/SphereComponent.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "Net/UnrealNetwork.h"
 
@@ -27,7 +27,7 @@ ADaItemActor::ADaItemActor()
 	AbilitySystemComponent = CreateDefaultSubobject<UDaAbilitySystemComponent>("AbilitySystemComp");
 	AbilitySystemComponent->SetIsReplicated(true);
 	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
-	
+
 	bReplicates = true;
 }
 
@@ -45,44 +45,31 @@ void ADaItemActor::BeginPlay()
 
 void ADaItemActor::AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor)
 {
-	checkf(TypeTags.IsValid(), TEXT("ItemActor: TypeTags is not valid!"));
 	if (!InstigatorPawn)
 		return;
-	
-	if (APlayerState* PS = InstigatorPawn->GetPlayerState())
+
+	APlayerState* PS = InstigatorPawn->GetPlayerState();
+	if (PS)
 	{
-		UDaInventoryComponent* InventoryComponent = Cast<ADaPlayerState>(PS)->GetInventoryComponent();
-		if (InventoryComponent)
+		UDaInventoryComponent* InvComp = UDaInventoryComponent::GetInventoryFromActor(PS);
+		if (InvComp && InvComp->AddItem(ItemDefinitionID))
 		{
-			if (InventoryComponent->AddItem(this) && HasAuthority())
+			if (bDestroyActor && HasAuthority())
 			{
-				Execute_ItemAddedToInventory(this);
-				
-				if (bDestroyActor)
-					Destroy();
+				Destroy();
 			}
 		}
 	}
 }
 
-ADaItemActor* ADaItemActor::CreateFromInventoryItem(const FDaInventoryItemData& InventoryData)
-{
-	ADaItemActor* Actor = NewObject<ADaItemActor>();
-
-	// TODO: Recreate this from data
-	Actor->Name = InventoryData.ItemName;
-	Actor->Description = InventoryData.ItemDescription;
-	Actor->TypeTags = InventoryData.Tags;
-	Actor->OwnedAbilitySet = InventoryData.AbilitySetToGrant;
-
-	// TODO: Actor: set mesh, location and rotation
-	
-	return Actor;
-}
-
 void ADaItemActor::Interact_Implementation(APawn* InstigatorPawn)
 {
-	// Derived classes to implement
+	// Default behavior: items with a valid definition go into the instigator's inventory.
+	// Derived classes can override for other interact behavior.
+	if (ItemDefinitionID.IsValid())
+	{
+		Execute_AddToInventory(this, InstigatorPawn, true);
+	}
 }
 
 void ADaItemActor::SecondaryInteract_Implementation(APawn* InstigatorPawn)
@@ -96,7 +83,7 @@ FText ADaItemActor::GetInteractText_Implementation(APawn* InstigatorPawn)
 	{
 		return FText();
 	}
-	
+
 	return FText::Format(LOCTEXT("ItemActor", "ItemActor: {0}"), FText::FromName(OwnedAbilitySet->GetSetIdentityTag().GetTagName()));
 }
 
@@ -117,17 +104,20 @@ UAbilitySystemComponent* ADaItemActor::GetAbilitySystemComponent() const
 	return Cast<UAbilitySystemComponent>(AbilitySystemComponent);
 }
 
-int32 ADaItemActor::GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const
-{
-	OutItemTags = TypeTags;
-	return OutItemTags.IsValid() ? OutItemTags.Num() : 0;
-}
-
 void ADaItemActor::GrantSetToActor(UDaAbilitySystemComponent* ReceivingASC)
 {
 	if (ReceivingASC && OwnedAbilitySet)
 	{
 		ReceivingASC->GrantSet(OwnedAbilitySet);
+	}
+}
+
+void ADaItemActor::InitializeDroppedItem(const FPrimaryAssetId& InItemDefinitionID, UStaticMesh* DisplayMesh)
+{
+	ItemDefinitionID = InItemDefinitionID;
+	if (DisplayMesh)
+	{
+		MeshComp->SetStaticMesh(DisplayMesh);
 	}
 }
 

@@ -7,9 +7,9 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "DaAbilitySystemLibrary.generated.h"
 
-class UDaInventoryWidgetController;
 class UDaStatMenuWidgetController;
 class UDaOverlayWidgetController;
+class UDaInventoryWidgetController;
 /**
  * 
  */

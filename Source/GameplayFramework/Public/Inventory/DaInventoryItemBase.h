@@ -6,11 +6,20 @@
 #include "GameplayTagContainer.h"
 #include "DaInventoryItemBase.generated.h"
 
-class USlateBrushAsset;
-class IDaInventoryItemFactory;
 class UDaAbilitySet;
 class UDaInventoryComponent;
+class UDaItemDefinition;
+class UTexture2D;
+class USlateBrushAsset;
+struct FDaInventoryEntry;
 
+/**
+ * FDaInventoryItemData
+ *
+ * Plain snapshot of a UI item view-model. Retained for Blueprint compatibility
+ * (ToData / PopulateWithData). Runtime, authoritative inventory state lives in the
+ * FastArray (FDaInventoryEntry); this struct is a convenience copy for UI/BP code.
+ */
 USTRUCT(BlueprintType)
 struct FDaInventoryItemData
 {
@@ -21,25 +30,22 @@ struct FDaInventoryItemData
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	FName ItemDescription = FName();
-	
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	FGuid ItemID = FGuid();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	TSubclassOf<class UDaInventoryItemBase> ItemClass = nullptr;
-	
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	FGameplayTagContainer Tags = FGameplayTagContainer();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	TObjectPtr<USlateBrushAsset> ThumbnailBrush = nullptr;
-	
+	TSoftObjectPtr<UTexture2D> Icon = nullptr;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	TObjectPtr<UDaAbilitySet> AbilitySetToGrant = nullptr;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	int32 NestedInventorySize = 0;
-	
 	UPROPERTY(BlueprintReadOnly)
 	int32 ItemCount = 1;
 };
@@ -48,7 +54,15 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInventoryItemDataRemoved, const F
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInventoryItemUpdated, UDaInventoryItemBase*, item);
 
 /**
- * 
+ * UDaInventoryItemBase
+ *
+ * Transient, client-side UI view-model for a single inventory slot. It wraps one
+ * FDaInventoryEntry (the replicated FastArray record) together with its resolved
+ * UDaItemDefinition, and exposes the fields UMG widgets (UDaInventoryUIWidget list
+ * entries) bind to. These objects are created on demand by
+ * UDaInventoryWidgetController — they are NOT replicated and hold no authoritative
+ * gameplay state; the FastArray inventory (UDaInventoryComponent) is the source of
+ * truth.
  */
 UCLASS(Blueprintable, BlueprintType)
 class GAMEPLAYFRAMEWORK_API UDaInventoryItemBase : public UObject
@@ -59,88 +73,100 @@ public:
 
 	UDaInventoryItemBase();
 
-	static UDaInventoryItemBase* CreateFromData(const FDaInventoryItemData& Data);
-	
-	FGameplayTagContainer GetTags() const { return InventoryItemTags; }
+	// ----- Factories -----
 
-	UPROPERTY(Replicated, BlueprintReadOnly, Category="Inventory")
+	/** Build a view-model from a FastArray entry (resolving its item definition). */
+	static UDaInventoryItemBase* CreateFromEntry(const FDaInventoryEntry& Entry, UObject* Outer);
+
+	/** Legacy convenience factory kept for Blueprint compatibility. */
+	static UDaInventoryItemBase* CreateFromData(const FDaInventoryItemData& Data);
+
+	// ----- View-model fields (bound by UMG / Blueprints) -----
+
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
 	bool bIsEmptySlot = true;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, Category="Inventory")
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
 	FName Name;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Inventory")
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
 	FName Description;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Inventory")
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
 	FGuid ItemID;
-	
-	virtual void PopulateWithData(const FDaInventoryItemData& Data);
 
-	virtual FDaInventoryItemData ToData() const;
+	/** Which inventory slot this view-model represents. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
+	int32 SlotIndex = INDEX_NONE;
 
-	virtual void ClearData();
+	/** Stack count copied from the backing entry. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
+	int32 StackCount = 1;
 
-	static TArray<TScriptInterface<IDaInventoryItemFactory>> Factories;
+	/** Primary asset id of the backing UDaItemDefinition. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
+	FPrimaryAssetId ItemDefinitionID;
 
-	// Delegate to notify listeners when inventory changes
+	/** Icon for the slot, resolved from the item definition. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|UI")
+	TSoftObjectPtr<UTexture2D> Icon;
+
+	/** Legacy Slate brush thumbnail, kept for Blueprint image-binding compatibility. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|UI")
+	TObjectPtr<USlateBrushAsset> ThumbnailBrush;
+
+	// ----- Delegates -----
+
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
 	FOnInventoryItemDataRemoved OnInventoryItemRemoved;
 
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
 	FOnInventoryItemUpdated OnInventoryItemUpdated;
-	
+
+	// ----- Population -----
+
+	/** Populate this view-model from a resolved FastArray entry + definition. */
+	void PopulateFromEntry(const FDaInventoryEntry& Entry, UDaItemDefinition* Definition);
+
+	virtual void PopulateWithData(const FDaInventoryItemData& Data);
+	virtual FDaInventoryItemData ToData() const;
+	virtual void ClearData();
+
+	// ----- Queries -----
+
+	FGameplayTagContainer GetTags() const { return InventoryItemTags; }
+
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	FGameplayTag GetType() const;
+
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	virtual bool CanMergeWith(const UDaInventoryItemBase* OtherItem) const;
+
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	virtual void MergeWith(UDaInventoryItemBase* OtherItem);
+
+	/** Nested inventories are not supported in the FastArray model; returns null. */
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UDaInventoryComponent* GetNestedInventory() const { return nullptr; }
+
+	/** The backing UObject, if any (unused in FastArray model; kept for BP compat). */
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UObject* GetBaseObject() const { return BaseObject.Get(); }
+
+	void SetBaseObject(const UObject* Object) { BaseObject = const_cast<UObject*>(Object); }
+
 protected:
 
-	// Tags the item has if !bIsEmptySlot
-	UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category="Inventory")
+	// Tags of the item instance (from the item definition / entry)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inventory")
 	FGameplayTagContainer InventoryItemTags;
 
-	// Tags that define this inventory slot (and what can be put in it)
-	UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category="Inventory")
+	// Tags describing which slot this can occupy
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inventory")
 	FGameplayTagContainer SlotTags;
 
 	UPROPERTY(EditDefaultsOnly, Category="Inventory")
 	TObjectPtr<UDaAbilitySet> AbilitySetToGrant;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Inventory")
-	TObjectPtr<USlateBrushAsset> ThumbnailBrush;
-	
-	UPROPERTY(ReplicatedUsing="OnRep_NestedInventory", BlueprintReadOnly, Category = "Inventory")
-	TObjectPtr<UDaInventoryComponent> NestedInventory;
-	
-	UFUNCTION(BlueprintNativeEvent, Category="Inventory")
-	void OnRep_NestedInventory();
-	
-public:
-
-	UFUNCTION(BlueprintCallable, Category="AbilitySystem")
-	FGameplayTag GetType() const;
-	
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	virtual bool CanMergeWith(const UDaInventoryItemBase* OtherItem) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	virtual void MergeWith(UDaInventoryItemBase* OtherItem);
-	
-	// Tries to activate an ability on this inventory item with the tag InventoryItem.EquipAbility
-	UFUNCTION(BlueprintCallable, Category="AbilitySystem")
-	void ActivateEquipAbility();
-
-	UFUNCTION(BlueprintCallable, Category="AbilitySystem")
-	void EndEquipAbility();
-	
-	// If the item itself can host an inventory
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	UDaInventoryComponent* GetNestedInventory() const;
-
-	// This may or may not be valid if the object was destroyed when adding to inventory. Always check IsValid or not null before using.
-	UFUNCTION(BlueprintCallable, Category="Inventory")
-	UObject* GetBaseObject() const { return BaseObject.Get(); }
-	
-	void SetBaseObject(const UObject* Object) { BaseObject = const_cast<UObject*>(Object); }
-	
-protected:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UObject> BaseObject;

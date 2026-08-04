@@ -5,8 +5,8 @@
 
 #include "CoreGameplayTags.h"
 #include "GameplayFramework.h"
-#include "Inventory/DaInventoryWidgetController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Inventory/DaInventoryWidgetController.h"
 #include "UI/DaOverlayWidgetController.h"
 #include "UI/DaStatMenuWidgetController.h"
 #include "UI/DaUserWidgetBase.h"

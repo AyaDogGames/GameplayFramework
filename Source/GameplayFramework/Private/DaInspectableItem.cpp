@@ -4,10 +4,9 @@
 
 #include "DaCharacter.h"
 #include "DaInspectableComponent.h"
-#include "DaPlayerState.h"
 #include "GameplayFramework.h"
 #include "Components/SphereComponent.h"
-#include "Engine/AssetManager.h"
+#include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryComponent.h"
 
 #define LOCTEXT_NAMESPACE "InspectableItems"
@@ -70,12 +69,6 @@ void ADaInspectableItem::OnInspectionEnded_Implementation(APawn* InstigatorPawn)
 }
 
 
-int32 ADaInspectableItem::GetItemTags_Implementation(FGameplayTagContainer& OutItemTags) const
-{
-	OutItemTags = TypeTags;
-	return OutItemTags.IsValid() ? OutItemTags.Num() : 0;
-}
-
 void ADaInspectableItem::Interact_Implementation(APawn* InstigatorPawn)
 {
 	if (ADaCharacter* PlayerCharacter = Cast<ADaCharacter>(InstigatorPawn))
@@ -106,22 +99,21 @@ FText ADaInspectableItem::GetInteractText_Implementation(APawn* InstigatorPawn)
 
 void ADaInspectableItem::AddToInventory_Implementation(APawn* InstigatorPawn, bool bDestroyActor)
 {
-	checkf(TypeTags.IsValid(), TEXT("ADaInspectableItem: TypeTags is not valid!"));
+	if (!InstigatorPawn)
+		return;
 
-	if (APlayerState* PS = InstigatorPawn->GetPlayerState())
+	APlayerState* PS = InstigatorPawn->GetPlayerState();
+	if (PS)
 	{
-		UDaInventoryComponent* InventoryComponent = Cast<ADaPlayerState>(PS)->GetInventoryComponent();
-		if (InventoryComponent)
+		UDaInventoryComponent* InvComp = UDaInventoryComponent::GetInventoryFromActor(PS);
+		if (InvComp && InvComp->AddItem(ItemDefinitionID))
 		{
-			if (InventoryComponent->AddItem(this) && HasAuthority())
-			{
-				// dont allow it to be added again
-				bCanBeAddedToInventory = false;
-				
-				Execute_ItemAddedToInventory(this);
+			// dont allow it to be added again
+			bCanBeAddedToInventory = false;
 
-				if (bDestroyActor)
-					Destroy();
+			if (bDestroyActor && HasAuthority())
+			{
+				Destroy();
 			}
 		}
 	}

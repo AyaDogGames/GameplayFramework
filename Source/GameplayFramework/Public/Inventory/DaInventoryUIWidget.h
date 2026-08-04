@@ -10,7 +10,11 @@
 class UDaInventoryItemBase;
 
 /**
- * 
+ * UDaInventoryUIWidget
+ *
+ * List-entry widget for inventory slots. Used as an entry widget inside a UListView /
+ * UTileView; the list binds each row to a UDaInventoryItemBase view-model, delivered
+ * through NativeOnListItemObjectSet.
  */
 UCLASS(Blueprintable, ClassGroup=(Custom))
 class GAMEPLAYFRAMEWORK_API UDaInventoryUIWidget : public UDaUserWidgetBase, public IUserObjectListEntry
@@ -25,11 +29,11 @@ public:
 	virtual void NativeOnItemExpansionChanged(bool bIsExpanded) override;
 	virtual void NativeOnEntryReleased() override;
 	/* IUserObjectListEntry */
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (ExposeOnSpawn="true"))
-	UDaInventoryItemBase* InventoryItem;
+	TObjectPtr<UDaInventoryItemBase> InventoryItem;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (ExposeOnSpawn="true"))
 	FName SlotName;
-	
+
 };

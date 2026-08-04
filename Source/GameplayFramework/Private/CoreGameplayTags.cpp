@@ -18,6 +18,20 @@ namespace CoreGameplayTags
 	UE_DEFINE_GAMEPLAY_TAG(TAG_Input_InspectZoom, "Input.InspectZoom");
 	UE_DEFINE_GAMEPLAY_TAG(TAG_Input_InspectRotate, "Input.InspectRotate");
 	UE_DEFINE_GAMEPLAY_TAG(TAG_Input_PickupMoveItem, "Input.PickupMoveItem");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Item_Stat, "Item.Stat", "Base tag for per-instance numeric item stats stored as tag->count pairs on an inventory entry");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Item_Stat_Grade, "Item.Stat.Grade");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Item_Stat_Durability, "Item.Stat.Durability");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Equip_Slot, "Equip.Slot", "Base tag for equipment slots. One equipped item per leaf slot");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_WeaponMain, "Equip.Slot.WeaponMain");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_WeaponOff, "Equip.Slot.WeaponOff");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_Skill1, "Equip.Slot.Skill1");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_Skill2, "Equip.Slot.Skill2");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_Item1, "Equip.Slot.Item1");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_Item2, "Equip.Slot.Item2");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_Item3, "Equip.Slot.Item3");
+	UE_DEFINE_GAMEPLAY_TAG(TAG_Equip_Slot_Item4, "Equip.Slot.Item4");
 	
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Character, "Character", "Base character tag");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Character_ID, "Character.ID", "Base Tag for Character ID, add a new component to identify different characters to the subsystem");

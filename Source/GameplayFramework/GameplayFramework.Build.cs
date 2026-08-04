@@ -40,16 +40,17 @@ public class GameplayFramework : ModuleRules
 				"ModelViewViewModel"
 			}
 			);
-			
-		
+
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"Slate",
 				"SlateCore",
-				"UMG", 
+				"UMG",
 				"Niagara",
 				"NavigationSystem",
+				"NetCore",
 			}
 			);
 		
