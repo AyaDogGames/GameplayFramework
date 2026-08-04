@@ -70,6 +70,37 @@ bool UDaEquipmentManagerComponent::UnequipSlot(FGameplayTag SlotTag)
 	return Internal_UnequipSlot(SlotTag);
 }
 
+void UDaEquipmentManagerComponent::ApplyLoadout()
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	UDaInventoryComponent* Inventory = ResolveInventory();
+	if (!Inventory)
+	{
+		return;
+	}
+
+	for (const TPair<FGameplayTag, FGuid>& Pair : Inventory->GetLoadout())
+	{
+		const FDaInventoryEntry* Entry = Inventory->FindEntryByItemID(Pair.Value);
+		if (!Entry)
+		{
+			// Assignment outlived the item (dropped, consumed, loaded from a stale save).
+			continue;
+		}
+
+		// Assignment-only slots (consumables on a hotbar) have nothing to equip.
+		UDaItemDefinition* Def = ResolveItemDefinition(Entry->ItemDefinitionID);
+		if (Def && !Def->EquipSlotTags.IsEmpty())
+		{
+			Internal_EquipItem(Pair.Value, Pair.Key);
+		}
+	}
+}
+
 void UDaEquipmentManagerComponent::Server_EquipItem_Implementation(FGuid ItemID, FGameplayTag SlotTag)
 {
 	Internal_EquipItem(ItemID, SlotTag);

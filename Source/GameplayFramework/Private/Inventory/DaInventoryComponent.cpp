@@ -34,6 +34,7 @@ void UDaInventoryComponent::GetLifetimeReplicatedProps(TArray<class FLifetimePro
 	DOREPLIFETIME(UDaInventoryComponent, InventoryList);
 	DOREPLIFETIME(UDaInventoryComponent, MaxSlots);
 	DOREPLIFETIME(UDaInventoryComponent, InventoryTags);
+	DOREPLIFETIME(UDaInventoryComponent, Loadout);
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +249,46 @@ int32 UDaInventoryComponent::GetItemSeed(FGuid ItemID)
 }
 
 // ---------------------------------------------------------------------------
+// Loadout
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::SetLoadoutSlot(FGameplayTag SlotTag, FGuid ItemID)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		// Client: route to server RPC (optimistic return; server validates)
+		Server_SetLoadoutSlot(SlotTag, ItemID);
+		return true;
+	}
+
+	return Internal_SetLoadoutSlot(SlotTag, ItemID);
+}
+
+FGuid UDaInventoryComponent::GetLoadoutItemID(FGameplayTag SlotTag) const
+{
+	for (const FDaLoadoutEntry& Entry : Loadout)
+	{
+		if (Entry.SlotTag == SlotTag)
+		{
+			return Entry.ItemID;
+		}
+	}
+
+	return FGuid();
+}
+
+TMap<FGameplayTag, FGuid> UDaInventoryComponent::GetLoadout() const
+{
+	TMap<FGameplayTag, FGuid> Result;
+	for (const FDaLoadoutEntry& Entry : Loadout)
+	{
+		Result.Add(Entry.SlotTag, Entry.ItemID);
+	}
+
+	return Result;
+}
+
+// ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
 
@@ -389,6 +430,14 @@ void UDaInventoryComponent::Server_SetItemStat_Implementation(FGuid ItemID, FGam
 	if (!Internal_SetItemStat(ItemID, StatTag, Count))
 	{
 		LOG_WARNING("Server_SetItemStat failed for item %s stat %s", *ItemID.ToString(), *StatTag.ToString());
+	}
+}
+
+void UDaInventoryComponent::Server_SetLoadoutSlot_Implementation(FGameplayTag SlotTag, FGuid ItemID)
+{
+	if (!Internal_SetLoadoutSlot(SlotTag, ItemID))
+	{
+		LOG_WARNING("Server_SetLoadoutSlot failed for slot %s item %s", *SlotTag.ToString(), *ItemID.ToString());
 	}
 }
 
@@ -680,6 +729,56 @@ bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayT
 
 	LOG_WARNING("Internal_SetItemStat: item %s not in inventory", *ItemID.ToString());
 	return false;
+}
+
+// ---------------------------------------------------------------------------
+// Internal loadout logic (server-only)
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::Internal_SetLoadoutSlot(FGameplayTag SlotTag, const FGuid& ItemID)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return false;
+	}
+
+	if (!SlotTag.IsValid())
+	{
+		LOG_WARNING("Internal_SetLoadoutSlot: invalid slot tag");
+		return false;
+	}
+
+	// An invalid ItemID clears the slot; anything else must name an item we actually hold.
+	if (ItemID.IsValid() && !FindEntryByItemID(ItemID))
+	{
+		LOG_WARNING("Internal_SetLoadoutSlot: item %s not in inventory", *ItemID.ToString());
+		return false;
+	}
+
+	for (int32 Index = 0; Index < Loadout.Num(); ++Index)
+	{
+		if (Loadout[Index].SlotTag == SlotTag)
+		{
+			if (ItemID.IsValid())
+			{
+				Loadout[Index].ItemID = ItemID;
+			}
+			else
+			{
+				Loadout.RemoveAt(Index);
+			}
+			return true;
+		}
+	}
+
+	if (ItemID.IsValid())
+	{
+		FDaLoadoutEntry& NewEntry = Loadout.AddDefaulted_GetRef();
+		NewEntry.SlotTag = SlotTag;
+		NewEntry.ItemID = ItemID;
+	}
+
+	return true;
 }
 
 // ---------------------------------------------------------------------------

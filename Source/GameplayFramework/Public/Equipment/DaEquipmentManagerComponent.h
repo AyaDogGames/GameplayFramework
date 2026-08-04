@@ -40,6 +40,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Equipment")
 	bool UnequipSlot(FGameplayTag SlotTag);
 
+	/** Authority-only: equip every loadout entry whose definition is equippable
+	 *  (EquipSlotTags non-empty). Consumable hotbar assignments are skipped.
+	 *  Called on possess so a fresh pawn inherits the player's persistent loadout. */
+	UFUNCTION(BlueprintCallable, Category="Equipment")
+	void ApplyLoadout();
+
 	UFUNCTION(BlueprintPure, Category="Equipment")
 	FGuid GetEquippedItemID(FGameplayTag SlotTag) const;
 

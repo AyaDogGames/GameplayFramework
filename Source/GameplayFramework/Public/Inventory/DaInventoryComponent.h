@@ -12,6 +12,24 @@ struct FDaInventoryEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInventoryEntryEvent, const FDaInventoryEntry&, Entry, int32, SlotIndex);
 
+/**
+ * FDaLoadoutEntry
+ * One loadout assignment: which inventory item the player wants in which Equip.Slot.*.
+ * An assignment is intent, not state — the pawn's UDaEquipmentManagerComponent turns it
+ * into equipped state on possess (see UDaEquipmentManagerComponent::ApplyLoadout).
+ */
+USTRUCT(BlueprintType)
+struct GAMEPLAYFRAMEWORK_API FDaLoadoutEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Loadout")
+	FGameplayTag SlotTag;
+
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Loadout")
+	FGuid ItemID;
+};
+
 UCLASS(Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class GAMEPLAYFRAMEWORK_API UDaInventoryComponent : public UActorComponent
 {
@@ -106,6 +124,22 @@ public:
 	UFUNCTION(BlueprintPure, Category="Inventory|Stats")
 	static int32 GetItemSeed(FGuid ItemID);
 
+	// ----- Loadout (which item the player wants in which Equip.Slot.*) -----
+	// Lives here (PlayerState side) so it survives pawn death and rides the save file.
+	// The pawn's UDaEquipmentManagerComponent applies it on possess.
+
+	/** Assign ItemID to SlotTag (invalid ItemID clears the slot). Routes to server. */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Loadout")
+	bool SetLoadoutSlot(FGameplayTag SlotTag, FGuid ItemID);
+
+	/** Which item is assigned to SlotTag; invalid Guid when the slot is unassigned. */
+	UFUNCTION(BlueprintPure, Category="Inventory|Loadout")
+	FGuid GetLoadoutItemID(FGameplayTag SlotTag) const;
+
+	/** Copy of the whole loadout as slot -> item. */
+	UFUNCTION(BlueprintPure, Category="Inventory|Loadout")
+	TMap<FGameplayTag, FGuid> GetLoadout() const;
+
 	// ----- Persistence (BlueprintCallable) -----
 
 	/** Returns a copy of entries for save serialization. */
@@ -166,6 +200,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category="Inventory")
 	FGameplayTagContainer InventoryTags;
 
+	/** Slot assignments, replicated as an array because a TMap cannot replicate. */
+	UPROPERTY(Replicated)
+	TArray<FDaLoadoutEntry> Loadout;
+
 private:
 
 	// ----- Server RPCs -----
@@ -188,6 +226,9 @@ private:
 	UFUNCTION(Server, Reliable)
 	void Server_SetItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Count);
 
+	UFUNCTION(Server, Reliable)
+	void Server_SetLoadoutSlot(FGameplayTag SlotTag, FGuid ItemID);
+
 	// ----- Client notifications (run on the owning client; locally on standalone/listen host) -----
 
 	UFUNCTION(Client, Reliable)
@@ -209,6 +250,9 @@ private:
 
 	/** Server-only: find entry, mutate stat, mark dirty, broadcast changed. */
 	bool Internal_SetItemStat(const FGuid& ItemID, FGameplayTag StatTag, int32 Count);
+
+	/** Server-only: assign, reassign or clear one loadout slot. */
+	bool Internal_SetLoadoutSlot(FGameplayTag SlotTag, const FGuid& ItemID);
 
 	/** Resolve and (if needed) synchronously load the item definition for an ID. */
 	class UDaItemDefinition* ResolveItemDefinition(FPrimaryAssetId ItemDefinitionID) const;
