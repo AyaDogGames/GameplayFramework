@@ -196,6 +196,58 @@ int32 UDaInventoryComponent::GetMaxSlots() const
 }
 
 // ---------------------------------------------------------------------------
+// Per-instance stats
+// ---------------------------------------------------------------------------
+
+const FDaInventoryEntry* UDaInventoryComponent::FindEntryByItemID(const FGuid& ItemID) const
+{
+	for (const FDaInventoryEntry& Entry : InventoryList.Entries)
+	{
+		if (Entry.ItemID == ItemID)
+		{
+			return &Entry;
+		}
+	}
+
+	return nullptr;
+}
+
+bool UDaInventoryComponent::SetItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Count)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		// Client: route to server RPC (optimistic return; server validates)
+		Server_SetItemStat(ItemID, StatTag, Count);
+		return true;
+	}
+
+	return Internal_SetItemStat(ItemID, StatTag, Count);
+}
+
+bool UDaInventoryComponent::AddItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Delta)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		// Client cannot read-modify-write safely; send the absolute result to the server.
+		Server_SetItemStat(ItemID, StatTag, GetItemStat(ItemID, StatTag) + Delta);
+		return true;
+	}
+
+	return Internal_SetItemStat(ItemID, StatTag, GetItemStat(ItemID, StatTag) + Delta);
+}
+
+int32 UDaInventoryComponent::GetItemStat(FGuid ItemID, FGameplayTag StatTag) const
+{
+	const FDaInventoryEntry* Entry = FindEntryByItemID(ItemID);
+	return Entry ? Entry->GetStatCount(StatTag) : 0;
+}
+
+int32 UDaInventoryComponent::GetItemSeed(FGuid ItemID)
+{
+	return static_cast<int32>(GetTypeHash(ItemID));
+}
+
+// ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
 
@@ -329,6 +381,14 @@ void UDaInventoryComponent::Server_DropItem_Implementation(int32 SlotIndex, int3
 	if (!Internal_DropItem(SlotIndex, Count))
 	{
 		LOG_WARNING("Server_DropItem failed for slot %d", SlotIndex);
+	}
+}
+
+void UDaInventoryComponent::Server_SetItemStat_Implementation(FGuid ItemID, FGameplayTag StatTag, int32 Count)
+{
+	if (!Internal_SetItemStat(ItemID, StatTag, Count))
+	{
+		LOG_WARNING("Server_SetItemStat failed for item %s stat %s", *ItemID.ToString(), *StatTag.ToString());
 	}
 }
 
@@ -580,6 +640,46 @@ bool UDaInventoryComponent::Internal_DropItem(int32 SlotIndex, int32 Count)
 	NotifyEntry.StackCount = DropCount;
 	Client_NotifyItemDropped(NotifyEntry);
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Internal stat logic (server-only)
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayTag StatTag, int32 Count)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return false;
+	}
+
+	if (!ItemID.IsValid() || !StatTag.IsValid())
+	{
+		LOG_WARNING("Internal_SetItemStat: invalid ItemID (%s) or stat tag (%s)", *ItemID.ToString(), *StatTag.ToString());
+		return false;
+	}
+
+	for (FDaInventoryEntry& Entry : InventoryList.Entries)
+	{
+		if (Entry.ItemID == ItemID)
+		{
+			if (Entry.MaxStackCount > 1)
+			{
+				LOG_WARNING("Internal_SetItemStat on stackable item %s (MaxStackCount=%d) — per-instance stats require MaxStackCount=1",
+					*Entry.ItemDefinitionID.ToString(), Entry.MaxStackCount);
+			}
+
+			Entry.SetStatCount(StatTag, Count);
+			InventoryList.MarkItemDirty(Entry);
+
+			// Mirrors FDaInventoryList::UpdateEntry's authority broadcast discipline.
+			OnEntryChangedInternal(Entry);
+			return true;
+		}
+	}
+
+	LOG_WARNING("Internal_SetItemStat: item %s not in inventory", *ItemID.ToString());
+	return false;
 }
 
 // ---------------------------------------------------------------------------

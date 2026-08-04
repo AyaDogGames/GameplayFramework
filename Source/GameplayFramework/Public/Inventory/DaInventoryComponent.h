@@ -85,6 +85,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	int32 GetMaxSlots() const;
 
+	// ----- Per-instance stats (see FDaInventoryEntry::StatTags) -----
+
+	/** Find the entry with the given ItemID, or nullptr. */
+	const FDaInventoryEntry* FindEntryByItemID(const FGuid& ItemID) const;
+
+	/** Set a per-instance stat to an absolute value (0 removes it). Routes to server. */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Stats")
+	bool SetItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Count);
+
+	/** Add Delta to a per-instance stat. Routes to server. */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Stats")
+	bool AddItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Delta);
+
+	/** Read a per-instance stat; 0 when the item or stat is absent. */
+	UFUNCTION(BlueprintPure, Category="Inventory|Stats")
+	int32 GetItemStat(FGuid ItemID, FGameplayTag StatTag) const;
+
+	/** Deterministic per-instance seed derived from the ItemID (stable across save/load). */
+	UFUNCTION(BlueprintPure, Category="Inventory|Stats")
+	static int32 GetItemSeed(FGuid ItemID);
+
 	// ----- Persistence (BlueprintCallable) -----
 
 	/** Returns a copy of entries for save serialization. */
@@ -164,6 +185,9 @@ private:
 	UFUNCTION(Server, Reliable)
 	void Server_DropItem(int32 SlotIndex, int32 Count);
 
+	UFUNCTION(Server, Reliable)
+	void Server_SetItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Count);
+
 	// ----- Client notifications (run on the owning client; locally on standalone/listen host) -----
 
 	UFUNCTION(Client, Reliable)
@@ -182,6 +206,9 @@ private:
 
 	/** Server-only logic: remove from inventory and spawn a world pickup actor. */
 	bool Internal_DropItem(int32 SlotIndex, int32 Count);
+
+	/** Server-only: find entry, mutate stat, mark dirty, broadcast changed. */
+	bool Internal_SetItemStat(const FGuid& ItemID, FGameplayTag StatTag, int32 Count);
 
 	/** Resolve and (if needed) synchronously load the item definition for an ID. */
 	class UDaItemDefinition* ResolveItemDefinition(FPrimaryAssetId ItemDefinitionID) const;

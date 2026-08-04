@@ -10,6 +10,22 @@
 struct FDaInventoryList;
 
 /**
+ * FDaTagStack
+ * One numeric per-instance stat: tag -> count (e.g. Item.Stat.Grade -> 7).
+ */
+USTRUCT(BlueprintType)
+struct GAMEPLAYFRAMEWORK_API FDaTagStack
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
+	FGameplayTag Tag;
+
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
+	int32 Count = 0;
+};
+
+/**
  * FDaInventoryEntry
  *
  * A single replicated inventory item instance, stored inside FDaInventoryList.
@@ -55,6 +71,20 @@ struct GAMEPLAYFRAMEWORK_API FDaInventoryEntry : public FFastArraySerializerItem
 	// Optional ability set granted while this item is active
 	UPROPERTY(BlueprintReadOnly, Category="Inventory")
 	FPrimaryAssetId AbilitySetID;
+
+	// Numeric per-instance state as tag->count pairs (grade, durability, charges, ...).
+	// A plain array on purpose: a nested FastArray cannot delta-serialize inside
+	// another FastArray item. Mutate ONLY through UDaInventoryComponent's stat API.
+	UPROPERTY(BlueprintReadOnly, Category="Inventory")
+	TArray<FDaTagStack> StatTags;
+
+	// Non-replicated query accelerator; server maintains inline, clients rebuild
+	// in the FastArray replication callbacks.
+	TMap<FGameplayTag, int32> StatCountMap;
+
+	int32 GetStatCount(FGameplayTag Tag) const;
+	void SetStatCount(FGameplayTag Tag, int32 Count);
+	void RebuildStatCountMap();
 
 	// ----- Queries -----
 
