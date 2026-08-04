@@ -676,6 +676,26 @@ FGuid UDaEquipmentManagerComponent::GetItemIDForAbility(FGameplayAbilitySpecHand
 	return FGuid();
 }
 
+FGuid UDaEquipmentManagerComponent::FindItemIDForSpawnedActor(const AActor* SpawnedActor) const
+{
+	if (!SpawnedActor)
+	{
+		return FGuid();
+	}
+
+	for (const FDaAppliedEquipmentEntry& Entry : EquipmentList.Entries)
+	{
+		for (const TObjectPtr<AActor>& Actor : Entry.SpawnedActors)
+		{
+			if (Actor.Get() == SpawnedActor)
+			{
+				return Entry.ItemID;
+			}
+		}
+	}
+	return FGuid();
+}
+
 UDaEquipmentManagerComponent* UDaEquipmentManagerComponent::GetEquipmentFromActor(AActor* Actor)
 {
 	return Actor ? Actor->FindComponentByClass<UDaEquipmentManagerComponent>() : nullptr;

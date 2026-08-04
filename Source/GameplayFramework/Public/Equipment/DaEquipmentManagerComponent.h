@@ -74,6 +74,12 @@ public:
 	/** Server-only: which inventory item granted this ability spec (invalid Guid on clients/miss). */
 	FGuid GetItemIDForAbility(FGameplayAbilitySpecHandle Handle) const;
 
+	/** Which equipped item spawned this actor (invalid Guid when none did). Reads the REPLICATED
+	 *  entry list, so a spawned cosmetic can identify the item it represents on clients too —
+	 *  which is how UDaConditionComponent finds its item without being told. */
+	UFUNCTION(BlueprintPure, Category="Equipment")
+	FGuid FindItemIDForSpawnedActor(const AActor* SpawnedActor) const;
+
 	UFUNCTION(BlueprintCallable, Category="Equipment", meta=(DefaultToSelf="Actor"))
 	static UDaEquipmentManagerComponent* GetEquipmentFromActor(AActor* Actor);
 
