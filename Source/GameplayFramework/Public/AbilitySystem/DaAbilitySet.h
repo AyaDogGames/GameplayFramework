@@ -135,16 +135,14 @@ public:
 	// Useful for keeping track or identifying this set later
 	FORCEINLINE FGameplayTag GetSetIdentityTag() const { return SetIdentityTag; }
 
-	// Gameplay abilities to grant when this ability set is granted.
-	// Public so editor/content scripts can author entries: the Python editor API cannot see
-	// protected UPROPERTYs at all (not even to read them).
-	UPROPERTY(EditDefaultsOnly, Category = "Gameplay Abilities", meta=(TitleProperty=Ability))
-	TArray<FDaAbilitySet_GameplayAbility> GrantedGameplayAbilities;
-
 protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "AbilitySet", meta=(TitleProperty=SetIdentityTag))
 	FGameplayTag SetIdentityTag;
+
+	// Gameplay abilities to grant when this ability set is granted.
+	UPROPERTY(EditDefaultsOnly, Category = "Gameplay Abilities", meta=(TitleProperty=Ability))
+	TArray<FDaAbilitySet_GameplayAbility> GrantedGameplayAbilities;
 
 	// Gameplay effects to grant when this ability set is granted.
 	UPROPERTY(EditDefaultsOnly, Category = "Gameplay Effects", meta=(TitleProperty=GameplayEffect))

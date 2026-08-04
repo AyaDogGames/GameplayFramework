@@ -108,11 +108,13 @@ public:
 	/** Find the entry with the given ItemID, or nullptr. */
 	const FDaInventoryEntry* FindEntryByItemID(const FGuid& ItemID) const;
 
-	/** Set a per-instance stat to an absolute value (0 removes it). Routes to server. */
+	/** Set a per-instance stat to an absolute value (0 removes it). Routes to server.
+	 *  StatTag must be under Item.Stat; negative counts are clamped to 0. */
 	UFUNCTION(BlueprintCallable, Category="Inventory|Stats")
 	bool SetItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Count);
 
-	/** Add Delta to a per-instance stat. Routes to server. */
+	/** Add Delta to a per-instance stat. Routes the DELTA to the server, which does the
+	 *  read-modify-write against its own value. Same tag/clamp rules as SetItemStat. */
 	UFUNCTION(BlueprintCallable, Category="Inventory|Stats")
 	bool AddItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Delta);
 
@@ -226,6 +228,11 @@ private:
 	UFUNCTION(Server, Reliable)
 	void Server_SetItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Count);
 
+	/** Delta form: the server does the read-modify-write, so two clients adjusting the same
+	 *  stat cannot clobber each other with stale absolute values. */
+	UFUNCTION(Server, Reliable)
+	void Server_AddItemStat(FGuid ItemID, FGameplayTag StatTag, int32 Delta);
+
 	UFUNCTION(Server, Reliable)
 	void Server_SetLoadoutSlot(FGameplayTag SlotTag, FGuid ItemID);
 
@@ -253,6 +260,10 @@ private:
 
 	/** Server-only: assign, reassign or clear one loadout slot. */
 	bool Internal_SetLoadoutSlot(FGameplayTag SlotTag, const FGuid& ItemID);
+
+	/** Server-only: drop every loadout assignment naming ItemID. Called when the item leaves
+	 *  the inventory, so an assignment can never outlive its item. */
+	void ClearLoadoutForItem(const FGuid& ItemID);
 
 	/** Resolve and (if needed) synchronously load the item definition for an ID. */
 	class UDaItemDefinition* ResolveItemDefinition(FPrimaryAssetId ItemDefinitionID) const;

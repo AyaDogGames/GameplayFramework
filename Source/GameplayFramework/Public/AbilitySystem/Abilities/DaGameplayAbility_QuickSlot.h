@@ -10,10 +10,11 @@
 /**
  * UDaGameplayAbility_QuickSlot
  *
- * Generic hotbar activation. Grant one instance per hotbar button through an
- * ability set entry whose InputTag is Input.Item1..4 and set QuickSlotTag to the
- * matching Equip.Slot.Item1..4. On activation: looks up the loadout item in that
- * slot; consumables are Used, equippables toggle equip/unequip.
+ * Generic hotbar activation. Grant one instance per hotbar button through an ability set
+ * entry, whose InputTag is any Input.* tag the consuming project routes to the ASC (the
+ * Input.Item1..4 leaves GlitchShaper uses are game-side tags, not plugin ones), and set
+ * QuickSlotTag to the Equip.Slot.* that button drives. On activation: looks up the loadout
+ * item in that slot; consumables are Used, equippables toggle equip/unequip.
  */
 UCLASS()
 class GAMEPLAYFRAMEWORK_API UDaGameplayAbility_QuickSlot : public UDaGameplayAbilityBase
@@ -29,11 +30,9 @@ public:
 		const FGameplayAbilityActivationInfo ActivationInfo,
 		const FGameplayEventData* TriggerEventData) override;
 
-	/**
-	 * Which Equip.Slot.* this instance drives (set per-entry in the granting BP subclass/asset).
-	 * Public so editor scripts and the hotbar UI can read/author it — a protected UPROPERTY is
-	 * invisible to the Python editor API.
-	 */
+protected:
+
+	/** Which Equip.Slot.* this instance drives (set per-entry in the granting BP subclass/asset). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="QuickSlot", meta=(Categories="Equip.Slot"))
 	FGameplayTag QuickSlotTag;
 };

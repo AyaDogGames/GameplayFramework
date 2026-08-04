@@ -78,8 +78,11 @@ struct GAMEPLAYFRAMEWORK_API FDaInventoryEntry : public FFastArraySerializerItem
 	UPROPERTY(BlueprintReadOnly, Category="Inventory")
 	TArray<FDaTagStack> StatTags;
 
-	// Non-replicated query accelerator; server maintains inline, clients rebuild
-	// in the FastArray replication callbacks.
+	// Non-replicated query accelerator (not a UPROPERTY: it neither replicates nor serializes).
+	// The authority maintains it inline through SetStatCount, and rebuilds it whenever an entry
+	// arrives as a copy instead — FDaInventoryList::AddEntry (save load, RPC-carried entries) and
+	// the client-side FastArray callbacks. GetStatCount falls back to a StatTags scan, so a stale
+	// map costs speed, never correctness.
 	TMap<FGameplayTag, int32> StatCountMap;
 
 	int32 GetStatCount(FGameplayTag Tag) const;

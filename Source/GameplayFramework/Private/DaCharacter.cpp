@@ -63,6 +63,22 @@ void ADaCharacter::InitAbilitySystem()
 	}
 }
 
+void ADaCharacter::UnPossessed()
+{
+	// Revoke before the PlayerState link is torn down: the equipment grants live on the
+	// PlayerState's ASC, which the respawned pawn inherits, so leaving them here means the
+	// re-applied loadout stacks a second copy of every equipment ability.
+	if (HasAuthority())
+	{
+		if (UDaEquipmentManagerComponent* Equipment = UDaEquipmentManagerComponent::GetEquipmentFromActor(this))
+		{
+			Equipment->UnequipAll();
+		}
+	}
+
+	Super::UnPossessed();
+}
+
 void ADaCharacter::LoadProgress()
 {
 	// If SaveData->First time load in, initialize, otherwise load saved values from disk

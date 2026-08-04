@@ -3,10 +3,12 @@
 #include "Equipment/DaEquipmentManagerComponent.h"
 
 #include "AbilitySystemGlobals.h"
+#include "CoreGameplayTags.h"
 #include "Engine/AssetManager.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
+#include "GameplayFramework.h"
 #include "Net/UnrealNetwork.h"
 #include "AbilitySystem/DaAbilitySet.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
@@ -18,30 +20,87 @@ UDaEquipmentManagerComponent::UDaEquipmentManagerComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
+
+	// The first replication bunch can be applied before BeginPlay runs, and the FastArray
+	// callbacks need the owner to broadcast through (Lyra sets this in the constructor too).
+	EquipmentList.OwnerComponent = this;
 }
 
 void UDaEquipmentManagerComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	EquipmentList.OwnerComponent = this;
+	EquipmentList.OwnerComponent = this; // belt and braces; the constructor already set it
+
+	EnsureInventoryBinding();
 }
 
 void UDaEquipmentManagerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// Copy the slots first: unequipping mutates the entry array while we walk it.
-	if (GetOwnerRole() == ROLE_Authority)
+	// Backstop for the UnPossessed drain: a pawn destroyed while still possessed
+	// (or one that never had a controller) still has to give its grants back.
+	UnequipAll();
+
+	if (UDaInventoryComponent* Inventory = BoundInventory.Get())
 	{
-		TArray<FGameplayTag> Slots;
-		for (const FDaAppliedEquipmentEntry& Entry : EquipmentList.Entries)
-		{
-			Slots.Add(Entry.SlotTag);
-		}
-		for (const FGameplayTag& Slot : Slots)
-		{
-			Internal_UnequipSlot(Slot);
-		}
+		Inventory->OnEntryRemoved.RemoveDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
 	}
+	BoundInventory.Reset();
+
 	Super::EndPlay(EndPlayReason);
+}
+
+void UDaEquipmentManagerComponent::UnequipAll()
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	// Copy the slots first: unequipping mutates the entry array while we walk it.
+	TArray<FGameplayTag> Slots;
+	Slots.Reserve(EquipmentList.Entries.Num());
+	for (const FDaAppliedEquipmentEntry& Entry : EquipmentList.Entries)
+	{
+		Slots.Add(Entry.SlotTag);
+	}
+	for (const FGameplayTag& Slot : Slots)
+	{
+		Internal_UnequipSlot(Slot);
+	}
+}
+
+void UDaEquipmentManagerComponent::EnsureInventoryBinding()
+{
+	if (GetOwnerRole() != ROLE_Authority || BoundInventory.IsValid())
+	{
+		return;
+	}
+
+	UDaInventoryComponent* Inventory = ResolveInventory();
+	if (!Inventory)
+	{
+		// No PlayerState yet — ApplyLoadout (which runs on possess) tries again.
+		return;
+	}
+
+	Inventory->OnEntryRemoved.AddDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
+	BoundInventory = Inventory;
+}
+
+void UDaEquipmentManagerComponent::OnInventoryEntryRemoved(const FDaInventoryEntry& Entry, int32 SlotIndex)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	// The item is gone from the inventory (dropped, consumed, wiped by a load), so the
+	// equipment state that references it must go with it.
+	const FGameplayTag Slot = FindSlotForItem(Entry.ItemID);
+	if (Slot.IsValid())
+	{
+		Internal_UnequipSlot(Slot);
+	}
 }
 
 void UDaEquipmentManagerComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -76,6 +135,9 @@ void UDaEquipmentManagerComponent::ApplyLoadout()
 	{
 		return;
 	}
+
+	// Runs on possess, by which point the PlayerState (and its inventory) exists.
+	EnsureInventoryBinding();
 
 	UDaInventoryComponent* Inventory = ResolveInventory();
 	if (!Inventory)
@@ -115,27 +177,41 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 {
 	check(GetOwnerRole() == ROLE_Authority);
 
+	// Client-supplied slot tags reach here through Server_EquipItem, so validate the tag tree.
+	if (SlotTag.IsValid() && !SlotTag.MatchesTag(CoreGameplayTags::TAG_Equip_Slot))
+	{
+		LOG_WARNING("[%s] EquipItem: rejected slot tag %s (not under %s)", *GetNameSafe(GetOwner()),
+			*SlotTag.ToString(), *CoreGameplayTags::TAG_Equip_Slot.GetTag().ToString());
+		return false;
+	}
+
 	UDaInventoryComponent* Inventory = ResolveInventory();
 	if (!Inventory)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[%s] EquipItem: no inventory component found"), *GetNameSafe(GetOwner()));
+		LOG_WARNING("[%s] EquipItem: no inventory component found", *GetNameSafe(GetOwner()));
 		return false;
 	}
 	const FDaInventoryEntry* Entry = Inventory->FindEntryByItemID(ItemID);
 	if (!Entry)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[%s] EquipItem: item %s not in inventory"), *GetNameSafe(GetOwner()), *ItemID.ToString());
+		LOG_WARNING("[%s] EquipItem: item %s not in inventory", *GetNameSafe(GetOwner()), *ItemID.ToString());
 		return false;
 	}
 
-	UDaItemDefinition* Def = ResolveItemDefinition(Entry->ItemDefinitionID);
+	// Copy everything needed off the inventory entry NOW: unequipping below can remove
+	// inventory-side entries (and reallocate the array), leaving this pointer dangling.
+	const FPrimaryAssetId EntryDefinitionID = Entry->ItemDefinitionID;
+	const FPrimaryAssetId EntryAbilitySetID = Entry->AbilitySetID;
+	Entry = nullptr;
+
+	UDaItemDefinition* Def = ResolveItemDefinition(EntryDefinitionID);
 	if (!Def)
 	{
 		return false;
 	}
 	if (Def->EquipSlotTags.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[%s] EquipItem: %s has no EquipSlotTags"), *GetNameSafe(GetOwner()), *Def->GetName());
+		LOG_WARNING("[%s] EquipItem: %s has no EquipSlotTags", *GetNameSafe(GetOwner()), *Def->GetName());
 		return false;
 	}
 
@@ -144,7 +220,7 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 	{
 		if (!Def->EquipSlotTags.HasTag(SlotTag))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[%s] EquipItem: %s not allowed in slot %s"),
+			LOG_WARNING("[%s] EquipItem: %s not allowed in slot %s",
 				*GetNameSafe(GetOwner()), *Def->GetName(), *SlotTag.ToString());
 			return false;
 		}
@@ -175,22 +251,20 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 	{
 		Internal_UnequipSlot(SlotTag);
 	}
-	// Item equipped elsewhere -> move it (unequip old slot first).
-	if (IsItemEquipped(ItemID))
+	// Item equipped elsewhere -> move it. Read the slot tag, leave the loop, THEN unequip:
+	// Internal_UnequipSlot removes from the array we would still be iterating.
+	const FGameplayTag PreviousSlot = FindSlotForItem(ItemID);
+	if (PreviousSlot.IsValid())
 	{
-		for (const FDaAppliedEquipmentEntry& Existing : EquipmentList.Entries)
-		{
-			if (Existing.ItemID == ItemID)
-			{
-				Internal_UnequipSlot(Existing.SlotTag);
-				break;
-			}
-		}
+		Internal_UnequipSlot(PreviousSlot);
 	}
 
-	FDaAppliedEquipmentEntry& NewEntry = EquipmentList.Entries.AddDefaulted_GetRef();
+	// Build the entry as a LOCAL and only publish it once it is fully populated: spawning
+	// actors and granting abilities can add/remove entries, which invalidates any reference
+	// into EquipmentList.Entries held across those calls.
+	FDaAppliedEquipmentEntry NewEntry;
 	NewEntry.ItemID = ItemID;
-	NewEntry.ItemDefinitionID = Entry->ItemDefinitionID;
+	NewEntry.ItemDefinitionID = EntryDefinitionID;
 	NewEntry.SlotTag = SlotTag;
 
 	// Spawn equipment actors first so the primary actor can be the abilities' SourceObject.
@@ -224,13 +298,13 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 
 	// Grant the ability set: per-entry override first, else the definition's.
 	UDaAbilitySet* SetToGrant = nullptr;
-	if (Entry->AbilitySetID.IsValid())
+	if (EntryAbilitySetID.IsValid())
 	{
 		// Per-instance override, resolved through the asset manager like definitions are.
-		SetToGrant = Cast<UDaAbilitySet>(UAssetManager::Get().GetPrimaryAssetObject(Entry->AbilitySetID));
+		SetToGrant = Cast<UDaAbilitySet>(UAssetManager::Get().GetPrimaryAssetObject(EntryAbilitySetID));
 		if (!SetToGrant)
 		{
-			const FSoftObjectPath Path = UAssetManager::Get().GetPrimaryAssetPath(Entry->AbilitySetID);
+			const FSoftObjectPath Path = UAssetManager::Get().GetPrimaryAssetPath(EntryAbilitySetID);
 			SetToGrant = Cast<UDaAbilitySet>(Path.TryLoad());
 		}
 	}
@@ -254,8 +328,10 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 		}
 	}
 
-	EquipmentList.MarkItemDirty(NewEntry);
-	HandleEquipped(NewEntry); // authority-side broadcast (clients get it via PostReplicatedAdd)
+	EquipmentList.Entries.Add(MoveTemp(NewEntry));
+	EquipmentList.MarkItemDirty(EquipmentList.Entries.Last());
+	// Authority-side broadcast (clients get it via PostReplicatedAdd).
+	HandleEquipped(EquipmentList.Entries.Last());
 	return true;
 }
 
@@ -263,35 +339,59 @@ bool UDaEquipmentManagerComponent::Internal_UnequipSlot(FGameplayTag SlotTag)
 {
 	check(GetOwnerRole() == ROLE_Authority);
 
-	for (int32 Index = 0; Index < EquipmentList.Entries.Num(); ++Index)
+	const int32 Index = EquipmentList.Entries.IndexOfByPredicate(
+		[SlotTag](const FDaAppliedEquipmentEntry& Candidate) { return Candidate.SlotTag == SlotTag; });
+	if (Index == INDEX_NONE)
 	{
-		FDaAppliedEquipmentEntry& Entry = EquipmentList.Entries[Index];
-		if (Entry.SlotTag != SlotTag)
-		{
-			continue;
-		}
-		for (const FGameplayAbilitySpecHandle& Handle : Entry.GrantedHandles.GetAbilitySpecHandles())
-		{
-			AbilityToItemMap.Remove(Handle);
-		}
-		if (UDaAbilitySystemComponent* ASC = ResolveASC())
-		{
-			Entry.GrantedHandles.TakeFromAbilitySystem(ASC);
-		}
-		for (AActor* Spawned : Entry.SpawnedActors)
-		{
-			if (IsValid(Spawned))
-			{
-				Spawned->Destroy();
-			}
-		}
-		const FDaAppliedEquipmentEntry Removed = Entry; // copy for the broadcast
-		EquipmentList.Entries.RemoveAt(Index);
-		EquipmentList.MarkArrayDirty();
-		HandleUnequipped(Removed);
-		return true;
+		return false;
 	}
-	return false;
+
+	// Work from a copy from here on: the broadcast below can re-enter this component, and
+	// nothing may hold a reference into Entries across it. The copy carries GrantedHandles
+	// and SpawnedActors, so the teardown is identical.
+	FDaAppliedEquipmentEntry Removed = EquipmentList.Entries[Index];
+
+	// Broadcast BEFORE tearing anything down so host-side listeners see the same live state a
+	// client sees in PreReplicatedRemove: spawned actors still valid, grants still on the ASC.
+	HandleUnequipped(Removed);
+
+	// Re-locate: a listener may have changed the array under us.
+	const int32 RemoveAtIndex = EquipmentList.Entries.IndexOfByPredicate(
+		[&Removed](const FDaAppliedEquipmentEntry& Candidate) { return Candidate.ItemID == Removed.ItemID && Candidate.SlotTag == Removed.SlotTag; });
+	if (RemoveAtIndex != INDEX_NONE)
+	{
+		EquipmentList.Entries.RemoveAt(RemoveAtIndex);
+		EquipmentList.MarkArrayDirty();
+	}
+
+	for (const FGameplayAbilitySpecHandle& Handle : Removed.GrantedHandles.GetAbilitySpecHandles())
+	{
+		AbilityToItemMap.Remove(Handle);
+	}
+	if (UDaAbilitySystemComponent* ASC = ResolveASC())
+	{
+		Removed.GrantedHandles.TakeFromAbilitySystem(ASC);
+	}
+	for (AActor* Spawned : Removed.SpawnedActors)
+	{
+		if (IsValid(Spawned))
+		{
+			Spawned->Destroy();
+		}
+	}
+	return true;
+}
+
+FGameplayTag UDaEquipmentManagerComponent::FindSlotForItem(const FGuid& ItemID) const
+{
+	for (const FDaAppliedEquipmentEntry& Entry : EquipmentList.Entries)
+	{
+		if (Entry.ItemID == ItemID)
+		{
+			return Entry.SlotTag;
+		}
+	}
+	return FGameplayTag();
 }
 
 FGuid UDaEquipmentManagerComponent::GetEquippedItemID(FGameplayTag SlotTag) const
@@ -340,6 +440,11 @@ void UDaEquipmentManagerComponent::HandleEquipped(const FDaAppliedEquipmentEntry
 void UDaEquipmentManagerComponent::HandleUnequipped(const FDaAppliedEquipmentEntry& Entry)
 {
 	OnUnequipped.Broadcast(Entry);
+}
+
+void UDaEquipmentManagerComponent::HandleChanged(const FDaAppliedEquipmentEntry& Entry)
+{
+	OnEquipmentChanged.Broadcast(Entry);
 }
 
 UDaInventoryComponent* UDaEquipmentManagerComponent::ResolveInventory() const

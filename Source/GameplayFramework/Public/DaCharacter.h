@@ -37,7 +37,12 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "AbilitySystem")
 	void OnCharacterAbilitiesLoaded();
-	
+
+	/** Drains this pawn's equipment on the authority. The ASC lives on the PlayerState, so a
+	 *  pawn that keeps its grants after losing the PlayerState double-grants when the respawned
+	 *  pawn re-applies the same loadout. */
+	virtual void UnPossessed() override;
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UDaInteractionComponent> InteractionComp;

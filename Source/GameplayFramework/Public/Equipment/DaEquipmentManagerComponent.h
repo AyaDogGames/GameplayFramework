@@ -11,6 +11,7 @@
 class UDaAbilitySystemComponent;
 class UDaInventoryComponent;
 class UDaItemDefinition;
+struct FDaInventoryEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEquipmentEntryEvent, const FDaAppliedEquipmentEntry&, Entry);
 
@@ -40,6 +41,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Equipment")
 	bool UnequipSlot(FGameplayTag SlotTag);
 
+	/** Authority-only: drain every occupied slot (revoke grants, destroy spawned actors).
+	 *  Used when the pawn is unpossessed and again as an EndPlay backstop. */
+	UFUNCTION(BlueprintCallable, Category="Equipment")
+	void UnequipAll();
+
 	/** Authority-only: equip every loadout entry whose definition is equippable
 	 *  (EquipSlotTags non-empty). Consumable hotbar assignments are skipped.
 	 *  Called on possess so a fresh pawn inherits the player's persistent loadout. */
@@ -62,11 +68,20 @@ public:
 	void HandleEquipped(const FDaAppliedEquipmentEntry& Entry);
 	void HandleUnequipped(const FDaAppliedEquipmentEntry& Entry);
 
+	/** Called from FDaAppliedEquipmentEntry::PostReplicatedChange on clients. An entry whose
+	 *  SpawnedActors references were unmapped when it first arrived resolves them through this
+	 *  path, so listeners that need the actors get a second chance at them. */
+	void HandleChanged(const FDaAppliedEquipmentEntry& Entry);
+
 	UPROPERTY(BlueprintAssignable, Category="Equipment")
 	FOnEquipmentEntryEvent OnEquipped;
 
 	UPROPERTY(BlueprintAssignable, Category="Equipment")
 	FOnEquipmentEntryEvent OnUnequipped;
+
+	/** An already-equipped entry changed on the wire (e.g. its SpawnedActors finally resolved). */
+	UPROPERTY(BlueprintAssignable, Category="Equipment")
+	FOnEquipmentEntryEvent OnEquipmentChanged;
 
 protected:
 
@@ -88,6 +103,18 @@ private:
 	bool Internal_EquipItem(const FGuid& ItemID, FGameplayTag SlotTag);
 	bool Internal_UnequipSlot(FGameplayTag SlotTag);
 
+	/** Which slot holds ItemID, or an invalid tag. */
+	FGameplayTag FindSlotForItem(const FGuid& ItemID) const;
+
+	/** Authority-only, idempotent: subscribe to the resolved inventory's removal delegate so an
+	 *  item that leaves the inventory cannot stay equipped. The inventory lives on the
+	 *  PlayerState, which is not always assigned by BeginPlay, so ApplyLoadout retries. */
+	void EnsureInventoryBinding();
+
+	/** Bound to UDaInventoryComponent::OnEntryRemoved on the authority. */
+	UFUNCTION()
+	void OnInventoryEntryRemoved(const FDaInventoryEntry& Entry, int32 SlotIndex);
+
 	/** PlayerState (preferred) or owner inventory component. */
 	UDaInventoryComponent* ResolveInventory() const;
 	UDaAbilitySystemComponent* ResolveASC() const;
@@ -95,4 +122,7 @@ private:
 
 	/** Server-only: ability spec handle -> granting item. */
 	TMap<FGameplayAbilitySpecHandle, FGuid> AbilityToItemMap;
+
+	/** Inventory whose OnEntryRemoved this component is currently bound to (authority only). */
+	TWeakObjectPtr<UDaInventoryComponent> BoundInventory;
 };

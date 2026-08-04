@@ -19,7 +19,7 @@ class UStaticMesh;
  * Blueprint extension point for per-equip behavior (visuals, anim, audio).
  */
 USTRUCT(BlueprintType)
-struct FDaEquipmentActorToSpawn
+struct GAMEPLAYFRAMEWORK_API FDaEquipmentActorToSpawn
 {
 	GENERATED_BODY()
 

@@ -22,4 +22,11 @@ void FDaAppliedEquipmentEntry::PostReplicatedAdd(const FDaEquipmentList& InArray
 
 void FDaAppliedEquipmentEntry::PostReplicatedChange(const FDaEquipmentList& InArraySerializer)
 {
+	// SpawnedActors references that were unmapped when the entry first arrived (the actor
+	// channel had not opened yet) resolve through a later change delta, and this is the only
+	// notification clients get for it.
+	if (InArraySerializer.OwnerComponent)
+	{
+		InArraySerializer.OwnerComponent->HandleChanged(*this);
+	}
 }

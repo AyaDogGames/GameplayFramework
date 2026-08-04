@@ -14,17 +14,29 @@
 #include "Inventory/DaItemDefinition.h"
 #include "Net/UnrealNetwork.h"
 
+namespace
+{
+	// Bounds on client-driven growth: a compromised client must not be able to grow an
+	// entry's stat array or the loadout without limit.
+	constexpr int32 MaxStatTagsPerEntry = 32;
+	constexpr int32 MaxLoadoutEntries = 16;
+}
+
 UDaInventoryComponent::UDaInventoryComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
+
+	// The first replication bunch can be applied before BeginPlay runs, and the FastArray
+	// callbacks need the owner to broadcast through (Lyra sets this in the constructor too).
+	InventoryList.OwnerComponent = this;
 }
 
 void UDaInventoryComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	InventoryList.OwnerComponent = this;
+	InventoryList.OwnerComponent = this; // belt and braces; the constructor already set it
 }
 
 void UDaInventoryComponent::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
@@ -229,8 +241,9 @@ bool UDaInventoryComponent::AddItemStat(FGuid ItemID, FGameplayTag StatTag, int3
 {
 	if (GetOwnerRole() != ROLE_Authority)
 	{
-		// Client cannot read-modify-write safely; send the absolute result to the server.
-		Server_SetItemStat(ItemID, StatTag, GetItemStat(ItemID, StatTag) + Delta);
+		// Send the DELTA, not a client-computed absolute: the client's replicated copy can be a
+		// frame or more stale, and the server owns the arithmetic.
+		Server_AddItemStat(ItemID, StatTag, Delta);
 		return true;
 	}
 
@@ -303,6 +316,16 @@ void UDaInventoryComponent::LoadInventory(const TArray<FDaInventoryEntry>& Saved
 	{
 		LOG_WARNING("LoadInventory called on non-authority. Ignoring.");
 		return;
+	}
+
+	// Tell listeners the old contents are going away before they do. Clients get exactly this
+	// notification from PreReplicatedRemove when the wipe replicates; without it, authority-side
+	// listeners (equipment, UI) would keep state for entries that no longer exist.
+	// Copied first: the broadcast can re-enter and mutate Entries.
+	const TArray<FDaInventoryEntry> Existing = InventoryList.Entries;
+	for (const FDaInventoryEntry& Entry : Existing)
+	{
+		OnEntryRemovedInternal(Entry);
 	}
 
 	// Clear existing entries
@@ -430,6 +453,15 @@ void UDaInventoryComponent::Server_SetItemStat_Implementation(FGuid ItemID, FGam
 	if (!Internal_SetItemStat(ItemID, StatTag, Count))
 	{
 		LOG_WARNING("Server_SetItemStat failed for item %s stat %s", *ItemID.ToString(), *StatTag.ToString());
+	}
+}
+
+void UDaInventoryComponent::Server_AddItemStat_Implementation(FGuid ItemID, FGameplayTag StatTag, int32 Delta)
+{
+	// Read-modify-write against the server's own value, not a value the client computed.
+	if (!Internal_SetItemStat(ItemID, StatTag, GetItemStat(ItemID, StatTag) + Delta))
+	{
+		LOG_WARNING("Server_AddItemStat failed for item %s stat %s delta %d", *ItemID.ToString(), *StatTag.ToString(), Delta);
 	}
 }
 
@@ -607,8 +639,11 @@ bool UDaInventoryComponent::Internal_UseItem(int32 SlotIndex)
 		return false;
 	}
 
-	// Snapshot before any consume so listeners see the entry as it was used
+	// Snapshot before any consume so listeners see the entry as it was used. The identity comes
+	// along because the event below can invalidate both the pointer and the slot index.
 	const FDaInventoryEntry UsedEntry = *Entry;
+	const FGuid UsedItemID = Entry->ItemID;
+	Entry = nullptr;
 
 	// Let GAS abilities respond (e.g. an ability triggered by Action.UseItem applying the item's effect)
 	if (AActor* Avatar = ResolveOwnerAvatar())
@@ -623,7 +658,16 @@ bool UDaInventoryComponent::Internal_UseItem(int32 SlotIndex)
 
 	if (Def->bConsumeOnUse)
 	{
-		RemoveItem(SlotIndex, 1);
+		// The ability that just ran could have consumed, moved or dropped this very item, so
+		// find it again by identity rather than trusting SlotIndex to still mean the same thing.
+		const FDaInventoryEntry* Current = FindEntryByItemID(UsedItemID);
+		if (!Current)
+		{
+			LOG("Internal_UseItem: item %s no longer in the inventory after the use event — nothing to consume", *UsedItemID.ToString());
+			Client_NotifyItemUsed(UsedEntry);
+			return true;
+		}
+		RemoveItem(Current->SlotIndex, 1);
 	}
 
 	Client_NotifyItemUsed(UsedEntry);
@@ -660,16 +704,27 @@ bool UDaInventoryComponent::Internal_DropItem(int32 SlotIndex, int32 Count)
 
 	const int32 DropCount = (Count == 0) ? Entry->StackCount : FMath::Min(Count, Entry->StackCount);
 	const FDaInventoryEntry DroppedEntry = *Entry;
+	const FGuid DroppedItemID = Entry->ItemID;
+	Entry = nullptr;
 
 	// Resolve pickup class before mutating inventory so a bad class fails the whole drop
 	UClass* PickupClass = Def->PickupActorClass.IsNull() ? ADaItemActor::StaticClass() : Def->PickupActorClass.LoadSynchronous();
 	if (!PickupClass)
 	{
-		LOG_WARNING("Internal_DropItem: failed to load PickupActorClass for %s", *Entry->ItemDefinitionID.ToString());
+		LOG_WARNING("Internal_DropItem: failed to load PickupActorClass for %s", *DroppedEntry.ItemDefinitionID.ToString());
 		return false;
 	}
 
-	if (!RemoveItem(SlotIndex, DropCount >= DroppedEntry.StackCount ? 0 : DropCount))
+	// The synchronous loads above can tick the loading path and run arbitrary code, so re-locate
+	// by identity: SlotIndex is only a name for where the item used to be.
+	const FDaInventoryEntry* Current = FindEntryByItemID(DroppedItemID);
+	if (!Current)
+	{
+		LOG_WARNING("Internal_DropItem: item %s left the inventory before it could be dropped", *DroppedItemID.ToString());
+		return false;
+	}
+
+	if (!RemoveItem(Current->SlotIndex, DropCount >= DroppedEntry.StackCount ? 0 : DropCount))
 	{
 		return false;
 	}
@@ -708,6 +763,18 @@ bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayT
 		return false;
 	}
 
+	// Clients reach this through Server_SetItemStat / Server_AddItemStat, so the tag is
+	// untrusted input: only the Item.Stat tree may be written through the stat API.
+	if (!StatTag.MatchesTag(CoreGameplayTags::TAG_Item_Stat))
+	{
+		LOG_WARNING("Internal_SetItemStat: rejected stat tag %s (not under %s)",
+			*StatTag.ToString(), *CoreGameplayTags::TAG_Item_Stat.GetTag().ToString());
+		return false;
+	}
+
+	// Counts are magnitudes; a negative one has no meaning and 0 is the "remove" encoding.
+	Count = FMath::Max(0, Count);
+
 	for (FDaInventoryEntry& Entry : InventoryList.Entries)
 	{
 		if (Entry.ItemID == ItemID)
@@ -716,6 +783,14 @@ bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayT
 			{
 				LOG_WARNING("Internal_SetItemStat on stackable item %s (MaxStackCount=%d) — per-instance stats require MaxStackCount=1",
 					*Entry.ItemDefinitionID.ToString(), Entry.MaxStackCount);
+			}
+
+			// Cap the array a client can grow. Existing tags (and removals) always go through.
+			if (Count > 0 && Entry.GetStatCount(StatTag) == 0 && Entry.StatTags.Num() >= MaxStatTagsPerEntry)
+			{
+				LOG_WARNING("Internal_SetItemStat: item %s already holds %d stat tags (max %d) — rejected %s",
+					*ItemID.ToString(), Entry.StatTags.Num(), MaxStatTagsPerEntry, *StatTag.ToString());
+				return false;
 			}
 
 			Entry.SetStatCount(StatTag, Count);
@@ -748,6 +823,14 @@ bool UDaInventoryComponent::Internal_SetLoadoutSlot(FGameplayTag SlotTag, const 
 		return false;
 	}
 
+	// Clients reach this through Server_SetLoadoutSlot, so the tag is untrusted input.
+	if (!SlotTag.MatchesTag(CoreGameplayTags::TAG_Equip_Slot))
+	{
+		LOG_WARNING("Internal_SetLoadoutSlot: rejected slot tag %s (not under %s)",
+			*SlotTag.ToString(), *CoreGameplayTags::TAG_Equip_Slot.GetTag().ToString());
+		return false;
+	}
+
 	// An invalid ItemID clears the slot; anything else must name an item we actually hold.
 	if (ItemID.IsValid() && !FindEntryByItemID(ItemID))
 	{
@@ -773,12 +856,35 @@ bool UDaInventoryComponent::Internal_SetLoadoutSlot(FGameplayTag SlotTag, const 
 
 	if (ItemID.IsValid())
 	{
+		if (Loadout.Num() >= MaxLoadoutEntries)
+		{
+			LOG_WARNING("Internal_SetLoadoutSlot: loadout already holds %d assignments (max %d) — rejected %s",
+				Loadout.Num(), MaxLoadoutEntries, *SlotTag.ToString());
+			return false;
+		}
+
 		FDaLoadoutEntry& NewEntry = Loadout.AddDefaulted_GetRef();
 		NewEntry.SlotTag = SlotTag;
 		NewEntry.ItemID = ItemID;
 	}
 
 	return true;
+}
+
+void UDaInventoryComponent::ClearLoadoutForItem(const FGuid& ItemID)
+{
+	if (GetOwnerRole() != ROLE_Authority || !ItemID.IsValid())
+	{
+		return;
+	}
+
+	for (int32 Index = Loadout.Num() - 1; Index >= 0; --Index)
+	{
+		if (Loadout[Index].ItemID == ItemID)
+		{
+			Loadout.RemoveAt(Index);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -827,6 +933,15 @@ void UDaInventoryComponent::OnEntryAddedInternal(const FDaInventoryEntry& Entry)
 
 void UDaInventoryComponent::OnEntryRemovedInternal(const FDaInventoryEntry& Entry)
 {
+	// Every full-removal path (RemoveItem, use-consume, drop, load-wipe) lands here, so this is
+	// the one place that has to keep the loadout from naming an item the inventory no longer
+	// holds. Done BEFORE the broadcast so listeners — the equipment manager above all — see a
+	// coherent loadout while they react.
+	if (GetOwnerRole() == ROLE_Authority)
+	{
+		ClearLoadoutForItem(Entry.ItemID);
+	}
+
 	OnEntryRemoved.Broadcast(Entry, Entry.SlotIndex);
 }
 

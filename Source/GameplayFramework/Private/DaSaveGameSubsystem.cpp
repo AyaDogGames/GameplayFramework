@@ -154,6 +154,15 @@ bool UDaSaveGameSubsystem::OverrideSpawnTransform(AController* NewPlayer)
 
 bool UDaSaveGameSubsystem::ReloadPlayerState(APlayerState* PlayerState)
 {
+	// Applying save data rewrites server-authoritative state (inventory, loadout, attributes).
+	// A client calling this would fight replication, so refuse outside the authority.
+	const UWorld* World = GetWorld();
+	if (World && World->GetNetMode() == NM_Client)
+	{
+		LOG_WARNING("ReloadPlayerState called on a client. Ignoring — save data is applied on the authority.");
+		return false;
+	}
+
 	ADaPlayerState* PS = Cast<ADaPlayerState>(PlayerState);
 	if (PS == nullptr || CurrentSaveGame == nullptr)
 	{

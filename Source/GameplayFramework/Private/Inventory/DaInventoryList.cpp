@@ -19,6 +19,11 @@ namespace
 void FDaInventoryList::AddEntry(const FDaInventoryEntry& NewEntry)
 {
 	Entries.Add(NewEntry);
+	// The copy's accelerator has to be derived from the StatTags it just received: a loaded or
+	// RPC-carried entry arrives with StatTags populated and StatCountMap empty (the map is not a
+	// UPROPERTY, so it neither serializes nor replicates). Redundant when NewEntry was built
+	// in-place, harmless either way.
+	Entries.Last().RebuildStatCountMap();
 	MarkItemDirty(Entries.Last());
 
 	if (ShouldBroadcastLocally(OwnerComponent))
