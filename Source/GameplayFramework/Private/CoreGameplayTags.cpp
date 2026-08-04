@@ -21,7 +21,6 @@ namespace CoreGameplayTags
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Item_Stat, "Item.Stat", "Base tag for per-instance numeric item stats stored as tag->count pairs on an inventory entry");
 	UE_DEFINE_GAMEPLAY_TAG(TAG_Item_Stat_Grade, "Item.Stat.Grade");
-	UE_DEFINE_GAMEPLAY_TAG(TAG_Item_Stat_Durability, "Item.Stat.Durability");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Item_Stat_Condition, "Item.Stat.Condition", "Per-instance wear: decays with use, repairable up to a grade-derived cap (see FDaConditionConfig)");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Item_Condition, "Item.Condition", "Base tag for condition bands. The equipment manager's penalty effects grant the leaves to the item owner");

@@ -47,10 +47,20 @@ public:
 
 	/** Equip the inventory item with ItemID. Empty SlotTag = first free slot the
 	 *  definition's EquipSlotTags allows. Occupied slot auto-unequips first.
-	 *  Routes to server when called on a client. */
+	 *  Routes to server when called on a client.
+	 *
+	 *  CAUTION on the return value off the authority: a client gets an OPTIMISTIC true the moment
+	 *  the RPC is sent, which says nothing about the outcome. The server may refuse the request
+	 *  outright (wrong slot, item not held, item inert) and, worse, the RPC can be absorbed before
+	 *  it ever leaves — a Server_* body invoked in a context that dispatches locally (all editor
+	 *  Python does, via FEditorScriptExecutionGuard) runs on the CALLER and is refused by the
+	 *  authority guard in Internal_EquipItem. Treat replicated equipment state, not this bool, as
+	 *  the answer. */
 	UFUNCTION(BlueprintCallable, Category="Equipment")
 	bool EquipItem(FGuid ItemID, FGameplayTag SlotTag);
 
+	/** Empty SlotTag's equipment. Routes to server when called on a client — with the same
+	 *  optimistic-return caveat as EquipItem above. */
 	UFUNCTION(BlueprintCallable, Category="Equipment")
 	bool UnequipSlot(FGameplayTag SlotTag);
 
@@ -58,6 +68,13 @@ public:
 	 *  Used when the pawn is unpossessed and again as an EndPlay backstop. */
 	UFUNCTION(BlueprintCallable, Category="Equipment")
 	void UnequipAll();
+
+	/** Authority-only: give up the bindings this component holds on PlayerState-hosted objects (the
+	 *  ASC's ability-activated callback). Called from ADaCharacter::UnPossessed, because the next
+	 *  possession can bring a different PlayerState — and so a different ASC — and a stale binding
+	 *  would wear down the outgoing player's items. ApplyLoadout re-binds on the next possess. */
+	UFUNCTION(BlueprintCallable, Category="Equipment")
+	void ReleaseOwnerBindings();
 
 	/** Authority-only: equip every loadout entry whose definition is equippable
 	 *  (EquipSlotTags non-empty). Consumable hotbar assignments are skipped.
@@ -155,8 +172,16 @@ private:
 	 *  broadcast can both call it. */
 	void RefreshConditionPenalty(FGameplayTag SlotTag);
 
-	/** Authority-only: drop the penalty effect tracked for SlotTag, if any. */
+	/** Authority-only: drop the penalty effect tracked for SlotTag, if any. Keeps the handle (and
+	 *  warns) when no ASC can be resolved, so a penalty can never be stranded un-removable. */
 	void ClearConditionPenalty(FGameplayTag SlotTag);
+
+	/** Next-tick half of the Broken path: RefreshConditionPenalty schedules this instead of
+	 *  unequipping inline, because the decay that broke the item runs inside the activating
+	 *  ability's PreActivate and the weapon actor is that ability's SourceObject. Re-checks that the
+	 *  slot still holds the same broken item before tearing anything down (a repair may have landed
+	 *  in the intervening tick). */
+	void HandleDeferredBreak(FGameplayTag SlotTag);
 
 	/** Condition (absolute) against the config's percentage thresholds of the grade-derived cap. */
 	static EDaConditionBand ComputeConditionBand(const FDaConditionConfig& Config, int32 Condition, int32 Grade);
@@ -174,6 +199,10 @@ private:
 	 *  previous item's penalty. Normal-band slots hold no entry in either map. */
 	TMap<FGameplayTag, FActiveGameplayEffectHandle> ConditionPenaltyHandles;
 	TMap<FGameplayTag, EDaConditionBand> ConditionBands;
+
+	/** Slots with a break teardown already scheduled for the next tick, so a burst of decay writes
+	 *  in one frame queues one teardown rather than one per write. */
+	TSet<FGameplayTag> PendingBreakSlots;
 
 	/** Inventory whose OnEntryRemoved this component is currently bound to (authority only). */
 	TWeakObjectPtr<UDaInventoryComponent> BoundInventory;

@@ -14,9 +14,11 @@
 #include "AbilitySystem/DaAbilitySet.h"
 #include "AbilitySystem/DaAbilitySystemComponent.h"
 #include "GameplayEffect.h"
+#include "Engine/World.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "Inventory/DaInventoryEntry.h"
 #include "Inventory/DaItemDefinition.h"
+#include "TimerManager.h"
 
 UDaEquipmentManagerComponent::UDaEquipmentManagerComponent()
 {
@@ -51,6 +53,9 @@ void UDaEquipmentManagerComponent::EndPlay(const EEndPlayReason::Type EndPlayRea
 	BoundInventory.Reset();
 
 	// The ASC outlives this pawn (it sits on the PlayerState), so the callback has to come off.
+	// Deliberately spelled out rather than calling ReleaseOwnerBindings(): this is the EndPlay
+	// backstop for a pawn that was never unpossessed, and keeping it independent means a change to
+	// the UnPossessed path cannot silently change teardown.
 	if (UDaAbilitySystemComponent* ASC = BoundASC.Get())
 	{
 		ASC->AbilityActivatedCallbacks.Remove(AbilityActivatedHandle);
@@ -83,7 +88,7 @@ void UDaEquipmentManagerComponent::UnequipAll()
 
 void UDaEquipmentManagerComponent::EnsureInventoryBinding()
 {
-	if (GetOwnerRole() != ROLE_Authority || BoundInventory.IsValid())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		return;
 	}
@@ -95,14 +100,40 @@ void UDaEquipmentManagerComponent::EnsureInventoryBinding()
 		return;
 	}
 
+	// Compare-and-rebind, not "bound once and done": a pawn can be re-possessed by a DIFFERENT
+	// controller, and the inventory lives on the PlayerState, so what this component resolves after
+	// a repossession may not be what it subscribed to. Still bound to the same one -> nothing to do.
+	if (BoundInventory.Get() == Inventory)
+	{
+		return;
+	}
+	if (UDaInventoryComponent* Previous = BoundInventory.Get())
+	{
+		Previous->OnEntryRemoved.RemoveDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
+		Previous->OnEntryChanged.RemoveDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryChanged);
+	}
+
 	Inventory->OnEntryRemoved.AddDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryRemoved);
 	Inventory->OnEntryChanged.AddDynamic(this, &UDaEquipmentManagerComponent::OnInventoryEntryChanged);
 	BoundInventory = Inventory;
 }
 
+void UDaEquipmentManagerComponent::ReleaseOwnerBindings()
+{
+	// The ASC belongs to the PlayerState, not to this pawn, so a possession change replaces it.
+	// Dropping the callback here (rather than leaving a binding pointing at the outgoing player's
+	// ASC) is what keeps a re-possessed pawn from decaying the previous player's items.
+	if (UDaAbilitySystemComponent* ASC = BoundASC.Get())
+	{
+		ASC->AbilityActivatedCallbacks.Remove(AbilityActivatedHandle);
+	}
+	BoundASC.Reset();
+	AbilityActivatedHandle.Reset();
+}
+
 void UDaEquipmentManagerComponent::EnsureAbilityDecayBinding()
 {
-	if (GetOwnerRole() != ROLE_Authority || BoundASC.IsValid())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		return;
 	}
@@ -112,6 +143,18 @@ void UDaEquipmentManagerComponent::EnsureAbilityDecayBinding()
 	{
 		// No PlayerState / ASC yet — ApplyLoadout and the equip path try again.
 		return;
+	}
+
+	// Same compare-and-rebind discipline as the inventory binding above: the ASC this component
+	// resolves after a repossession can be a different object from the one it subscribed to.
+	if (BoundASC.Get() == ASC)
+	{
+		return;
+	}
+	if (UDaAbilitySystemComponent* Previous = BoundASC.Get())
+	{
+		Previous->AbilityActivatedCallbacks.Remove(AbilityActivatedHandle);
+		AbilityActivatedHandle.Reset();
 	}
 
 	// Ability ACTIVATION, not commit: the spec asked for the commit callback, but committing is
@@ -232,14 +275,23 @@ EDaConditionBand UDaEquipmentManagerComponent::ComputeConditionBand(const FDaCon
 
 void UDaEquipmentManagerComponent::ClearConditionPenalty(FGameplayTag SlotTag)
 {
-	FActiveGameplayEffectHandle Handle;
-	if (ConditionPenaltyHandles.RemoveAndCopyValue(SlotTag, Handle) && Handle.IsValid())
+	const FActiveGameplayEffectHandle* Tracked = ConditionPenaltyHandles.Find(SlotTag);
+	if (Tracked && Tracked->IsValid())
 	{
-		if (UDaAbilitySystemComponent* ASC = ResolveASC())
+		// Resolve the ASC BEFORE the handle leaves the map. Removing it first and then failing to
+		// find an ASC would strand an infinite-duration penalty on a component nothing has a handle
+		// to any more; keeping the handle means the next call (or EndPlay) can still lift it.
+		const FActiveGameplayEffectHandle Handle = *Tracked;
+		UDaAbilitySystemComponent* ASC = ResolveASC();
+		if (!ASC)
 		{
-			ASC->RemoveActiveGameplayEffect(Handle);
+			LOG_WARNING("[%s] condition penalty for %s: no ASC resolved, keeping the handle rather "
+				"than stranding the effect", *GetNameSafe(GetOwner()), *SlotTag.ToString());
+			return;
 		}
+		ASC->RemoveActiveGameplayEffect(Handle);
 	}
+	ConditionPenaltyHandles.Remove(SlotTag);
 	ConditionBands.Remove(SlotTag);
 }
 
@@ -287,16 +339,25 @@ void UDaEquipmentManagerComponent::RefreshConditionPenalty(FGameplayTag SlotTag)
 
 	if (Band == EDaConditionBand::Broken)
 	{
-		LOG_WARNING("[%s] %s broke (Condition 0) and was unequipped from %s — repair required",
+		LOG_WARNING("[%s] %s broke (Condition 0) and is being unequipped from %s — repair required",
 			*GetNameSafe(GetOwner()), *Def->GetName(), *SlotTag.ToString());
+		// NOT here, and not synchronously. The decay that broke the item lands from
+		// OnAbilityActivated, which runs inside the ability's PreActivate — and the actor
+		// Internal_UnequipSlot would destroy is that still-activating ability's SourceObject.
+		// Tearing it down mid-activation is the crash. One tick later the activation has finished,
+		// and the deferred handler re-checks the band because a repair may have landed meanwhile.
 		// The loadout ASSIGNMENT deliberately survives (M1 semantics), so a repaired item is one
-		// hotbar press from being back in this slot. Internal_UnequipSlot clears the penalty.
-		Internal_UnequipSlot(SlotTag);
+		// hotbar press from being back in this slot.
+		if (UWorld* World = GetWorld(); World && !PendingBreakSlots.Contains(SlotTag))
+		{
+			PendingBreakSlots.Add(SlotTag);
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateUObject(
+				this, &UDaEquipmentManagerComponent::HandleDeferredBreak, SlotTag));
+		}
 		return;
 	}
 
 	ClearConditionPenalty(SlotTag);
-	ConditionBands.Add(SlotTag, Band);
 
 	TSubclassOf<UGameplayEffect> EffectClass;
 	if (Band == EDaConditionBand::Critical)
@@ -309,7 +370,14 @@ void UDaEquipmentManagerComponent::RefreshConditionPenalty(FGameplayTag SlotTag)
 	}
 	if (!EffectClass)
 	{
-		// Normal, or a band the definition deliberately left without an effect.
+		// Normal (no effect by definition), or a penalty band whose effect the content author
+		// deliberately cleared. Normal is recorded unconditionally — the early-out above is what
+		// keeps every single point of decay from redoing this work, and a Normal slot holds no
+		// effect that the record could get out of step with.
+		if (Band == EDaConditionBand::Normal)
+		{
+			ConditionBands.Add(SlotTag, Band);
+		}
 		return;
 	}
 
@@ -324,8 +392,57 @@ void UDaEquipmentManagerComponent::RefreshConditionPenalty(FGameplayTag SlotTag)
 		EffectClass->GetDefaultObject<UGameplayEffect>(), 1.f, ASC->MakeEffectContext());
 	if (Handle.IsValid())
 	{
+		// Record the band only now that there is an effect standing behind it: a band remembered
+		// after a failed apply would make the early-out above skip the retry that could fix it.
 		ConditionPenaltyHandles.Add(SlotTag, Handle);
+		ConditionBands.Add(SlotTag, Band);
 	}
+}
+
+void UDaEquipmentManagerComponent::HandleDeferredBreak(FGameplayTag SlotTag)
+{
+	PendingBreakSlots.Remove(SlotTag);
+
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	// Everything that mattered a tick ago may have changed: the slot could have been unequipped or
+	// swapped, the item could have left the inventory, or a repair could have brought it back above
+	// zero. Only an item that is STILL equipped here and STILL broken gets torn down.
+	const FGuid ItemID = GetEquippedItemID(SlotTag);
+	if (!ItemID.IsValid())
+	{
+		return;
+	}
+
+	UDaInventoryComponent* Inventory = ResolveInventory();
+	const FDaInventoryEntry* Entry = Inventory ? Inventory->FindEntryByItemID(ItemID) : nullptr;
+	if (!Entry)
+	{
+		// The item left the inventory; OnInventoryEntryRemoved has already unequipped the slot.
+		return;
+	}
+	const FPrimaryAssetId EntryDefinitionID = Entry->ItemDefinitionID;
+	Entry = nullptr;
+
+	const UDaItemDefinition* Def = ResolveItemDefinition(EntryDefinitionID);
+	if (!Def || !Def->ConditionConfig.bUsesCondition)
+	{
+		return;
+	}
+
+	const int32 Condition = Inventory->GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition);
+	const int32 Grade = Inventory->GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade);
+	if (ComputeConditionBand(Def->ConditionConfig, Condition, Grade) != EDaConditionBand::Broken)
+	{
+		// Repaired inside the grace tick: give the slot the band it actually deserves instead.
+		RefreshConditionPenalty(SlotTag);
+		return;
+	}
+
+	Internal_UnequipSlot(SlotTag);
 }
 
 void UDaEquipmentManagerComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -401,7 +518,16 @@ void UDaEquipmentManagerComponent::Server_UnequipSlot_Implementation(FGameplayTa
 
 bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGameplayTag SlotTag)
 {
-	check(GetOwnerRole() == ROLE_Authority);
+	// A guarded refusal, not an assert. A Server_* RPC body can execute locally on the caller —
+	// editor Python does it on every call (FEditorScriptExecutionGuard forces local dispatch), and
+	// a mis-owned component would too — and killing the process over a request we can simply refuse
+	// is the wrong trade. Same discipline as every Internal_* in UDaInventoryComponent.
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		LOG_WARNING("[%s] EquipItem: rejected on non-authority (role %d) — equipment is server-authoritative",
+			*GetNameSafe(GetOwner()), static_cast<int32>(GetOwnerRole()));
+		return false;
+	}
 
 	// Client-supplied slot tags reach here through Server_EquipItem, so validate the tag tree.
 	if (SlotTag.IsValid() && !SlotTag.MatchesTag(CoreGameplayTags::TAG_Equip_Slot))
@@ -572,18 +698,36 @@ bool UDaEquipmentManagerComponent::Internal_EquipItem(const FGuid& ItemID, FGame
 
 	EquipmentList.Entries.Add(MoveTemp(NewEntry));
 	EquipmentList.MarkItemDirty(EquipmentList.Entries.Last());
-	// Authority-side broadcast (clients get it via PostReplicatedAdd).
-	HandleEquipped(EquipmentList.Entries.Last());
 
-	// An item can be equipped already worn (picked up damaged, stowed while Critical), so the
-	// band it is in has to be applied on the way in, not only when the next stat write lands.
+	// An item can be equipped already worn (picked up damaged, stowed while Critical), so the band
+	// it is in has to be applied on the way in, not only when the next stat write lands — and
+	// BEFORE the equip broadcast, so listeners read the final Worn/Critical tags rather than a
+	// pristine-looking state that corrects itself a moment later.
 	RefreshConditionPenalty(SlotTag);
+
+	// Re-locate before broadcasting: applying a penalty effect runs listener code that can add or
+	// remove entries, so the index from a moment ago is not a promise.
+	const int32 EquippedIndex = EquipmentList.Entries.IndexOfByPredicate(
+		[&ItemID, SlotTag](const FDaAppliedEquipmentEntry& Candidate)
+		{ return Candidate.ItemID == ItemID && Candidate.SlotTag == SlotTag; });
+	if (EquippedIndex != INDEX_NONE)
+	{
+		// Authority-side broadcast (clients get it via PostReplicatedAdd).
+		HandleEquipped(EquipmentList.Entries[EquippedIndex]);
+	}
 	return true;
 }
 
 bool UDaEquipmentManagerComponent::Internal_UnequipSlot(FGameplayTag SlotTag)
 {
-	check(GetOwnerRole() == ROLE_Authority);
+	// See Internal_EquipItem: reachable off the authority (a locally dispatched Server_UnequipSlot),
+	// and a refusal beats an assert that takes the editor with it.
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		LOG_WARNING("[%s] UnequipSlot: rejected on non-authority (role %d) — equipment is server-authoritative",
+			*GetNameSafe(GetOwner()), static_cast<int32>(GetOwnerRole()));
+		return false;
+	}
 
 	const int32 Index = EquipmentList.Entries.IndexOfByPredicate(
 		[SlotTag](const FDaAppliedEquipmentEntry& Candidate) { return Candidate.SlotTag == SlotTag; });

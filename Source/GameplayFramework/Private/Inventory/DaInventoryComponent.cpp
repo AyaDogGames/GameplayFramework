@@ -312,7 +312,11 @@ int32 UDaInventoryComponent::GetRepairCost(FGuid ItemID, int32 Points) const
 	}
 
 	const int32 Grade = FMath::Clamp(GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade), 0, 10);
-	return RepairCostFor(Def->ConditionConfig, Grade, Points);
+	// Quote exactly what the till charges. Internal_RepairItem clamps an explicit order down to what
+	// is actually missing, so pricing the full Points here would quote a shop customer for points the
+	// item cannot hold — the quote and the charge have to be the same number.
+	const int32 Billable = FMath::Min(Points, GetMissingCondition(ItemID));
+	return RepairCostFor(Def->ConditionConfig, Grade, Billable);
 }
 
 int32 UDaInventoryComponent::GetMissingCondition(FGuid ItemID) const
@@ -403,6 +407,39 @@ void UDaInventoryComponent::LoadInventory(const TArray<FDaInventoryEntry>& Saved
 	for (const FDaInventoryEntry& Entry : SavedEntries)
 	{
 		InventoryList.AddEntry(Entry);
+	}
+
+	// Inert-lock migration. A save written before an item type opted into condition carries entries
+	// with no Item.Stat.Condition at all — and a stat count of 0 is how "absent" is stored, so those
+	// entries read as Broken and Internal_EquipItem refuses them forever. Fill them once, here, on
+	// the way in. Deliberately NOT in RestoreEntry: a drop snapshot carries its own stats by design,
+	// and re-initialising one would be a free repair.
+	TArray<FGuid> NeedsConditionInit;
+	for (const FDaInventoryEntry& Entry : InventoryList.Entries)
+	{
+		if (Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
+		{
+			continue;
+		}
+		const UDaItemDefinition* Def = ResolveItemDefinition(Entry.ItemDefinitionID);
+		if (Def && Def->ConditionConfig.bUsesCondition)
+		{
+			NeedsConditionInit.Add(Entry.ItemID);
+		}
+	}
+	// Second pass by identity: the stat writes below mark entries dirty and broadcast, and a
+	// listener is free to reshape the array we would otherwise still be walking.
+	for (const FGuid& ItemID : NeedsConditionInit)
+	{
+		const FDaInventoryEntry* Entry = FindEntryByItemID(ItemID);
+		const UDaItemDefinition* Def = Entry ? ResolveItemDefinition(Entry->ItemDefinitionID) : nullptr;
+		if (!Def)
+		{
+			continue;
+		}
+		LOG("LoadInventory: item %s (%s) loaded without Item.Stat.Condition — initialising it to its "
+			"grade cap (pre-condition save)", *ItemID.ToString(), *Def->GetName());
+		InitializeConditionStats(ItemID, *Def);
 	}
 }
 
@@ -559,6 +596,13 @@ void UDaInventoryComponent::Server_DropItem_Implementation(int32 SlotIndex, int3
 
 void UDaInventoryComponent::Server_SetItemStat_Implementation(FGuid ItemID, FGameplayTag StatTag, int32 Count)
 {
+	if (!IsClientWritableStat(StatTag))
+	{
+		LOG_WARNING("Server_SetItemStat: %s is not client-writable — rejected for item %s",
+			*StatTag.ToString(), *ItemID.ToString());
+		return;
+	}
+
 	if (!Internal_SetItemStat(ItemID, StatTag, Count))
 	{
 		LOG_WARNING("Server_SetItemStat failed for item %s stat %s", *ItemID.ToString(), *StatTag.ToString());
@@ -567,11 +611,37 @@ void UDaInventoryComponent::Server_SetItemStat_Implementation(FGuid ItemID, FGam
 
 void UDaInventoryComponent::Server_AddItemStat_Implementation(FGuid ItemID, FGameplayTag StatTag, int32 Delta)
 {
+	if (!IsClientWritableStat(StatTag))
+	{
+		LOG_WARNING("Server_AddItemStat: %s is not client-writable — rejected for item %s",
+			*StatTag.ToString(), *ItemID.ToString());
+		return;
+	}
+
 	// Read-modify-write against the server's own value, not a value the client computed.
 	if (!Internal_SetItemStat(ItemID, StatTag, GetItemStat(ItemID, StatTag) + Delta))
 	{
 		LOG_WARNING("Server_AddItemStat failed for item %s stat %s delta %d", *ItemID.ToString(), *StatTag.ToString(), Delta);
 	}
+}
+
+bool UDaInventoryComponent::IsClientWritableStat(FGameplayTag StatTag)
+{
+	// The protected leaves. These are provenance or economy inputs the authority alone decides:
+	// Grade is permanent (it fixes the condition cap AND prices every repair), so a client that
+	// could write it would mint itself a better item and a cheaper repair bill in one move.
+	// Server-side callers — spawners, loot tables, the acquisition path — do not come through here:
+	// they use SetItemStat/AddItemStat directly, which reach Internal_SetItemStat on the authority.
+	// Extend this list as M3 adds leaves with the same shape.
+	const FGameplayTag ProtectedLeaves[] = { CoreGameplayTags::TAG_Item_Stat_Grade };
+	for (const FGameplayTag& Protected : ProtectedLeaves)
+	{
+		if (StatTag.MatchesTagExact(Protected))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 void UDaInventoryComponent::Server_SetLoadoutSlot_Implementation(FGameplayTag SlotTag, FGuid ItemID)
@@ -640,6 +710,17 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 	// Check if stackable and try to stack with existing entries
 	if (Def->MaxStackCount > 1)
 	{
+		if (Def->ConditionConfig.bUsesCondition)
+		{
+			// Condition is per-INSTANCE state on one entry, and a stack is one entry standing in for
+			// many items, so there is no honest answer to "what condition is this stack in". The
+			// definition is misconfigured; IsDataValid flags it in the editor, and this is the same
+			// finding at runtime for content that shipped before the check existed.
+			LOG_WARNING("Internal_AddItem: %s sets bUsesCondition AND MaxStackCount=%d — stacked items "
+				"get no condition stats. Set MaxStackCount=1 on condition-using definitions.",
+				*Def->GetName(), Def->MaxStackCount);
+		}
+
 		// Build a temporary entry to test stacking compatibility
 		FDaInventoryEntry StackProbe;
 		StackProbe.ItemDefinitionID = ItemDefinitionID;
@@ -724,8 +805,13 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 			NewEntry.AbilitySetID = FPrimaryAssetId(FPrimaryAssetType(TEXT("AbilitySetData")), FName(*AssetName));
 		}
 
+		// Stamp condition onto the LOCAL entry, before it is published. Filling it afterwards
+		// through the stat path would publish a condition-user at 0 for an instant — one added
+		// broadcast that reads as Broken, then two more changed broadcasts correcting it. Stamped
+		// here, the entry is coherent the first time anyone sees it: one broadcast, one dirty mark.
+		InitializeConditionStats(NewEntry, *Def);
+
 		InventoryList.AddEntry(NewEntry);
-		InitializeConditionStats(NewEntry.ItemID, *Def);
 		Remaining -= EntryCount;
 	}
 
@@ -925,8 +1011,12 @@ bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayT
 			Entry.SetStatCount(StatTag, Count);
 			InventoryList.MarkItemDirty(Entry);
 
+			// Snapshot, then broadcast — the discipline the other five guards in this file follow.
+			// `Entry` is a reference into InventoryList.Entries, and the listeners this reaches
+			// (equipment penalties, wear visuals) are free to add or remove entries underneath it.
+			const FDaInventoryEntry Changed = Entry;
 			// Mirrors FDaInventoryList::UpdateEntry's authority broadcast discipline.
-			OnEntryChangedInternal(Entry);
+			OnEntryChangedInternal(Changed);
 			return true;
 		}
 	}
@@ -935,7 +1025,7 @@ bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayT
 	return false;
 }
 
-void UDaInventoryComponent::InitializeConditionStats(const FGuid& ItemID, const UDaItemDefinition& Def)
+void UDaInventoryComponent::InitializeConditionStats(FDaInventoryEntry& Entry, const UDaItemDefinition& Def)
 {
 	const FDaConditionConfig& Config = Def.ConditionConfig;
 	if (!Config.bUsesCondition)
@@ -944,13 +1034,37 @@ void UDaInventoryComponent::InitializeConditionStats(const FGuid& ItemID, const 
 	}
 
 	// Already worn in: this instance came from somewhere that owns its own stats.
-	if (GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
+	if (Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
 	{
 		return;
 	}
 
 	// A stat count of 0 is how "absent" is stored (SetStatCount(0) removes the tag), so a
 	// grade of 0 and no grade at all read the same here — both take the definition's default.
+	int32 Grade = Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Grade);
+	if (Grade <= 0)
+	{
+		Grade = FMath::Clamp(Config.DefaultGrade, 0, 10);
+		Entry.SetStatCount(CoreGameplayTags::TAG_Item_Stat_Grade, Grade);
+	}
+
+	// Items enter play at full condition.
+	Entry.SetStatCount(CoreGameplayTags::TAG_Item_Stat_Condition, Config.GetConditionCap(Grade));
+}
+
+void UDaInventoryComponent::InitializeConditionStats(const FGuid& ItemID, const UDaItemDefinition& Def)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	const FDaConditionConfig& Config = Def.ConditionConfig;
+	if (!Config.bUsesCondition || GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
+	{
+		return;
+	}
+
 	int32 Grade = GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade);
 	if (Grade <= 0)
 	{
@@ -958,8 +1072,8 @@ void UDaInventoryComponent::InitializeConditionStats(const FGuid& ItemID, const 
 		Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade, Grade);
 	}
 
-	// Items enter play at full condition; both writes go through the stat path, so each one
-	// validates, marks the entry dirty and broadcasts changed for the UI.
+	// Both writes go through the stat path: the entry is already published, so each one has to mark
+	// it dirty and broadcast changed for the UI and the equipment manager's band watcher.
 	Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition, Config.GetConditionCap(Grade));
 }
 

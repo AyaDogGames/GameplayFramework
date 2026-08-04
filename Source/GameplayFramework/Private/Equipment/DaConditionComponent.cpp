@@ -33,7 +33,7 @@ void UDaConditionComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (!RefreshWearParameters())
+	if (!RefreshAndIsSettled())
 	{
 		StartResolveRetry();
 	}
@@ -56,7 +56,7 @@ void UDaConditionComponent::SetItemID(FGuid NewItemID)
 {
 	ItemID = NewItemID;
 	ResolvedItemID.Invalidate();
-	if (RefreshWearParameters())
+	if (RefreshAndIsSettled())
 	{
 		// A retry may already be running from BeginPlay; being told the answer ends the search.
 		StopResolveRetry();
@@ -71,6 +71,22 @@ void UDaConditionComponent::SetItem(UDaInventoryComponent* Inventory, FGuid NewI
 {
 	ExplicitInventory = Inventory;
 	SetItemID(NewItemID);
+}
+
+void UDaConditionComponent::SetExplicitWear(float Intensity, float Seed, float Grade)
+{
+	// The caller did the arithmetic, so there is nothing left to resolve: stop the search before it
+	// spends its budget and then warns loudly about an item that was never missing. This is the path
+	// a dropped pickup takes — the entry it came from has left the inventory, so no lookup could
+	// ever succeed, and without this the actor would tick out its full retry timeout and complain.
+	StopResolveRetry();
+
+	WearIntensity = FMath::Clamp(Intensity, 0.f, 1.f);
+	WearSeed = FMath::Clamp(Seed, 0.f, 1.f);
+	WearGrade = FMath::Clamp(Grade, 0.f, 1.f);
+
+	EnsureWearMaterials();
+	PushWearParameters();
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +132,16 @@ bool UDaConditionComponent::RefreshWearParameters()
 	ResolvedItemID = Item;
 
 	EnsureWearMaterials();
+	PushWearParameters();
+
+	// Only worth binding once there is an item to watch, and the inventory we found is the one
+	// that owns it.
+	EnsureInventoryBinding();
+	return true;
+}
+
+void UDaConditionComponent::PushWearParameters()
+{
 	for (const TObjectPtr<UMaterialInstanceDynamic>& Material : WearMaterials)
 	{
 		if (UMaterialInstanceDynamic* MID = Material.Get())
@@ -125,11 +151,16 @@ bool UDaConditionComponent::RefreshWearParameters()
 			MID->SetScalarParameterValue(WearGradeParameterName, WearGrade);
 		}
 	}
+}
 
-	// Only worth binding once there is an item to watch, and the inventory we found is the one
-	// that owns it.
-	EnsureInventoryBinding();
-	return true;
+bool UDaConditionComponent::RefreshAndIsSettled()
+{
+	// Two things have to be true before there is nothing left to look for: an item to read, and at
+	// least one material slot on the owner to push into. A mesh component whose mesh arrives after
+	// BeginPlay reports zero slots, and the item resolving first would otherwise stop the search
+	// while the visual is still un-driven.
+	const bool bResolved = RefreshWearParameters();
+	return bResolved && bWearMaterialsBuilt;
 }
 
 float UDaConditionComponent::MakeWearSeed(FGuid ForItemID)
@@ -275,9 +306,12 @@ void UDaConditionComponent::EnsureWearMaterials()
 		}
 	}
 
-	// A mesh component whose mesh is assigned after BeginPlay (ADaItemActor fills its mesh on the
-	// drop path) reports no material slots yet, so leave the scan open until there is something
-	// to scan. An actor with slots but no wear-capable material is a legitimate no-op.
+	// Latch only once there was something to scan. A mesh component can report zero material slots
+	// because its mesh has not been assigned yet — anything that fills a mesh after BeginPlay
+	// (spawn-then-configure, a late async load) lands here — and latching on that would leave the
+	// visual permanently un-driven. An actor WITH slots but no wear-capable material among them is a
+	// legitimate no-op and does latch. (A dropped ADaItemActor is not an example of the late case:
+	// InitializeDroppedItem sets its mesh before FinishSpawning, so BeginPlay already sees slots.)
 	bWearMaterialsBuilt = SlotsSeen > 0;
 }
 
@@ -354,7 +388,7 @@ void UDaConditionComponent::StopResolveRetry()
 
 void UDaConditionComponent::RetryResolve()
 {
-	if (RefreshWearParameters())
+	if (RefreshAndIsSettled())
 	{
 		StopResolveRetry();
 		return;
@@ -366,8 +400,18 @@ void UDaConditionComponent::RetryResolve()
 		StopResolveRetry();
 		// Loud, because a wear visual that never found its item is silently pristine forever, and
 		// that reads as "the wear system is broken" rather than "this actor has no item".
-		LOG_WARNING("[%s] UDaConditionComponent gave up resolving its item after %.1fs — no "
-			"explicit ItemID and no equipment entry claims this actor (use SetItem for visuals "
-			"nobody equips)", *GetNameSafe(GetOwner()), ResolveRetryTimeout);
+		if (ResolvedItemID.IsValid())
+		{
+			LOG_WARNING("[%s] UDaConditionComponent resolved item %s but saw no material slots on the "
+				"owner after %.1fs — nothing to push wear into", *GetNameSafe(GetOwner()),
+				*ResolvedItemID.ToString(), ResolveRetryTimeout);
+		}
+		else
+		{
+			LOG_WARNING("[%s] UDaConditionComponent gave up resolving its item after %.1fs — no "
+				"explicit ItemID and no equipment entry claims this actor (use SetItem for visuals "
+				"nobody equips, or SetExplicitWear when the numbers are already known)",
+				*GetNameSafe(GetOwner()), ResolveRetryTimeout);
+		}
 	}
 }

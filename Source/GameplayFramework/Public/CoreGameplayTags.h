@@ -47,7 +47,6 @@ namespace CoreGameplayTags
 	// Per-instance item stats (tag->count pairs on inventory entries)
 	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat);
 	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat_Grade);
-	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat_Durability);
 	DA_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Item_Stat_Condition);
 
 	// Condition bands, applied to the owner's ASC by the equipment manager's penalty effects

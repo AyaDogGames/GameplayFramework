@@ -69,8 +69,12 @@ struct GAMEPLAYFRAMEWORK_API FDaConditionConfig
 	int32 CapPerGrade = 4;
 
 	/** Grade stamped at acquisition when nothing else set Item.Stat.Grade on the instance
-	 *  (a spawner or loot table that seeds Grade before the item is added wins over this). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="0", ClampMax="10"))
+	 *  (a spawner or loot table that seeds Grade before the item is added wins over this).
+	 *  Minimum 1, not 0: Grade rides the entry as a StatTags count, and a count of 0 is how the tag's
+	 *  ABSENCE is stored, so a grade-0 instance is indistinguishable from an ungraded one and the
+	 *  acquisition path would re-default it. Grade 0 is therefore unrepresentable by design — a
+	 *  documented deviation from the spec's 0..10 range. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Condition", meta=(ClampMin="1", ClampMax="10"))
 	int32 DefaultGrade = 5;
 
 	/** Percent of the cap below which WornEffect applies. */
@@ -192,4 +196,11 @@ public:
 	// ----- Primary Asset Id -----
 
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
+
+#if WITH_EDITOR
+	/** Catches the two condition misconfigurations that produce items nobody can use: a cap that
+	 *  works out to 0 (every instance acquired already Broken and unequippable) and a stackable
+	 *  condition-user (per-instance wear on an entry that stands in for several items). */
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 };

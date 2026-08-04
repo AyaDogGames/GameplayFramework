@@ -58,6 +58,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Condition")
 	void SetItem(UDaInventoryComponent* Inventory, FGuid NewItemID);
 
+	/** Push wear numbers the caller already has, bypassing item resolution entirely, and stop
+	 *  looking for an item. For a visual whose item is NOT in any inventory to be found: a dropped
+	 *  pickup (the entry left the inventory when it hit the ground, but the actor must still look as
+	 *  worn as the item that was dropped), a loot preview built from a template, a cinematic prop.
+	 *  All three values are clamped to [0,1] — Grade is the CONTRACT value (Grade/10), not 0..10. */
+	UFUNCTION(BlueprintCallable, Category="Condition")
+	void SetExplicitWear(float Intensity, float Seed, float Grade);
+
 	/** The item the component is currently driving: the explicit ItemID, or the one it resolved
 	 *  from the owning pawn's equipment. Invalid until it has resolved one. */
 	UFUNCTION(BlueprintPure, Category="Condition")
@@ -98,6 +106,11 @@ public:
 	static const FName WearSeedParameterName;
 	static const FName WearGradeParameterName;
 
+	/** Does this material expose any of the three contract parameters? Public so a caller that
+	 *  drives its own MIDs (ADaItemActor's dropped-pickup fallback, when the pickup class carries no
+	 *  condition component) can apply the same "only touch materials that opted in" rule. */
+	static bool ImplementsWearContract(const UMaterialInterface* Material);
+
 protected:
 
 	virtual void BeginPlay() override;
@@ -133,11 +146,17 @@ private:
 	UDaItemDefinition* ResolveItemDefinition(FPrimaryAssetId ItemDefinitionID) const;
 
 	/** Create, once, a MID for every owner mesh material slot whose material implements the
-	 *  contract. Latches only after it has seen at least one material slot, so a mesh that is
-	 *  filled in after BeginPlay (a dropped-item actor) still gets scanned. */
+	 *  contract. Latches only after it has seen at least one material slot, so an actor whose mesh
+	 *  is assigned after BeginPlay still gets scanned when the retry comes back round. */
 	void EnsureWearMaterials();
 
-	static bool ImplementsWearContract(const UMaterialInterface* Material);
+	/** Write the three cached values into every MID this component drives. */
+	void PushWearParameters();
+
+	/** RefreshWearParameters, plus the second half of "settled": true only when an item resolved AND
+	 *  at least one material slot has been seen. The retry loop's stop condition, so a resolved item
+	 *  on an actor with no mesh yet keeps the search alive. */
+	bool RefreshAndIsSettled();
 
 	/** Subscribe to the resolved inventory's entry-changed broadcast, so decay and repair move the
 	 *  visual. That broadcast reaches clients too: it fires from the FastArray's replication
