@@ -73,6 +73,10 @@ void ADaCharacter::UnPossessed()
 		if (UDaEquipmentManagerComponent* Equipment = UDaEquipmentManagerComponent::GetEquipmentFromActor(this))
 		{
 			Equipment->UnequipAll();
+			// The decay callback sits on that same PlayerState ASC, so it goes back too: a pawn
+			// re-possessed by another controller must not keep wearing down the previous player's
+			// items. ApplyLoadout re-binds on the next possess.
+			Equipment->ReleaseOwnerBindings();
 		}
 	}
 

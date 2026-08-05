@@ -126,6 +126,40 @@ public:
 	UFUNCTION(BlueprintPure, Category="Inventory|Stats")
 	static int32 GetItemSeed(FGuid ItemID);
 
+	// ----- Condition repair (the credits sink; see FDaConditionConfig) -----
+
+	/**
+	 * Spend the owning player's credits to raise this item's Item.Stat.Condition.
+	 * Points = 0 buys as many points as the player can afford, up to the item's grade-derived cap;
+	 * an explicit Points is clamped to what is missing and is REJECTED outright when the player
+	 * cannot afford all of it (a partial charge for an explicit order would be a surprise).
+	 * Cost = max(0, ceil(Points * RepairCreditsPerPoint * (1 + Grade * RepairGradeCostScale) - 1e-3)),
+	 * charged against ADaPlayerState::AdjustCredits. That thousandth-of-a-credit slack is not
+	 * cosmetic: the curve is authored as floats, so a price whose exact arithmetic is a whole number
+	 * of credits usually is not (grade 7 at the shipped defaults gives 3.40000002086... per point),
+	 * and a plain ceiling would charge one credit more than the content author priced.
+	 * Grade is provenance and never changes.
+	 * Routes to server if called on client (optimistic true; the server validates and may refuse —
+	 * and see EquipItem's caveat: a Server_* body dispatched locally never reaches the authority at
+	 * all, which is why the python MP harness cannot verify a client-issued repair).
+	 */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Condition")
+	bool RepairItem(FGuid ItemID, int32 Points = 0);
+
+	/**
+	 * Credit cost of buying Points condition points for this item, 0 when the item cannot be
+	 * repaired (unknown, not a condition user) or Points <= 0. UI-facing: same arithmetic the
+	 * server charges — including the clamp to what is actually missing, so quoting 100 points on an
+	 * 8-point gap prices the 8 the till will charge for.
+	 */
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	int32 GetRepairCost(FGuid ItemID, int32 Points) const;
+
+	/** How many condition points this item is missing (cap - current); 0 when it is at the cap
+	 *  or does not use condition. */
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	int32 GetMissingCondition(FGuid ItemID) const;
+
 	// ----- Loadout (which item the player wants in which Equip.Slot.*) -----
 	// Lives here (PlayerState side) so it survives pawn death and rides the save file.
 	// The pawn's UDaEquipmentManagerComponent applies it on possess.
@@ -148,9 +182,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inventory|Persistence")
 	TArray<FDaInventoryEntry> SaveInventory() const;
 
-	/** Server-only. Populates the inventory from previously saved data. */
+	/** Server-only. Populates the inventory from previously saved data. Entries whose definition uses
+	 *  condition but which carry no Item.Stat.Condition (a save written before that item type opted
+	 *  in) are filled to their grade cap on the way in — otherwise they would read as Broken and
+	 *  could never be equipped again. */
 	UFUNCTION(BlueprintCallable, Category="Inventory|Persistence")
 	void LoadInventory(const TArray<FDaInventoryEntry>& SavedEntries);
+
+	/**
+	 * Server-only. Put a single previously-removed entry back, keeping it the SAME instance:
+	 * ItemID, StatTags, Tags, AbilitySetID and StackCount are copied verbatim (LoadInventory's
+	 * discipline, one entry at a time). Used by a dropped ADaItemActor on re-pickup.
+	 * Fails when the entry has no ItemID, when this inventory already holds that ItemID
+	 * (an instance cannot exist twice), or when there is no free slot. The entry lands in its
+	 * saved SlotIndex if that slot is free, otherwise in the first free slot.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Persistence")
+	bool RestoreEntry(const FDaInventoryEntry& SavedEntry);
 
 	// ----- Static helpers -----
 
@@ -236,6 +284,9 @@ private:
 	UFUNCTION(Server, Reliable)
 	void Server_SetLoadoutSlot(FGameplayTag SlotTag, FGuid ItemID);
 
+	UFUNCTION(Server, Reliable)
+	void Server_RepairItem(FGuid ItemID, int32 Points);
+
 	// ----- Client notifications (run on the owning client; locally on standalone/listen host) -----
 
 	UFUNCTION(Client, Reliable)
@@ -257,6 +308,33 @@ private:
 
 	/** Server-only: find entry, mutate stat, mark dirty, broadcast changed. */
 	bool Internal_SetItemStat(const FGuid& ItemID, FGameplayTag StatTag, int32 Count);
+
+	/** Stamp Grade + full Condition directly onto an entry that has NOT been published yet, so it is
+	 *  coherent the first time any listener sees it. This is the acquisition path's form. */
+	static void InitializeConditionStats(FDaInventoryEntry& Entry, const class UDaItemDefinition& Def);
+
+	/** Server-only: same, for an entry already in the list — the writes go through the stat path so
+	 *  each marks the entry dirty and broadcasts. Used by the LoadInventory migration; NOT by
+	 *  RestoreEntry, whose snapshot carries its own stats (re-initialising would repair for free). */
+	void InitializeConditionStats(const FGuid& ItemID, const class UDaItemDefinition& Def);
+
+	/** May a CLIENT write this Item.Stat leaf through Server_SetItemStat / Server_AddItemStat?
+	 *  False for the protected leaves (Grade — permanent provenance that fixes both the condition
+	 *  cap and the repair price). Authority-side callers bypass the RPCs and are unaffected. */
+	static bool IsClientWritableStat(FGameplayTag StatTag);
+
+	/** Server-only: validate, charge the owner's credits, then raise Condition through the stat
+	 *  path (so the equipment manager's threshold watcher clears penalty bands on its own). */
+	bool Internal_RepairItem(const FGuid& ItemID, int32 Points);
+
+	/** Definition of the item with this ItemID, but only when the item is in this inventory AND
+	 *  its definition opts into condition; nullptr otherwise. The one gate every condition
+	 *  query and the repair path share, so they can never disagree about what is repairable. */
+	const class UDaItemDefinition* ResolveConditionDefinition(const FGuid& ItemID) const;
+
+	/** The ADaPlayerState whose credits pay for repairs: our owner when the inventory lives on a
+	 *  PlayerState (the normal case), else the owning pawn's PlayerState. */
+	class ADaPlayerState* ResolveOwnerPlayerState() const;
 
 	/** Server-only: assign, reassign or clear one loadout slot. */
 	bool Internal_SetLoadoutSlot(FGameplayTag SlotTag, const FGuid& ItemID);

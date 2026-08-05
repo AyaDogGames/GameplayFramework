@@ -6,8 +6,10 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "CoreGameplayTags.h"
 #include "DaItemActor.h"
+#include "DaPlayerState.h"
 #include "GameplayFramework.h"
 #include "Engine/AssetManager.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Inventory/DaInventoryItemBase.h"
 #include "Inventory/DaInventoryList.h"
@@ -20,6 +22,30 @@ namespace
 	// entry's stat array or the loadout without limit.
 	constexpr int32 MaxStatTagsPerEntry = 32;
 	constexpr int32 MaxLoadoutEntries = 16;
+
+	/**
+	 * Slack on the repair cost before rounding up. The cost curve is authored as floats, so a
+	 * price whose exact arithmetic is a whole number of credits usually is not: grade 7 at the
+	 * shipped defaults gives 2 * (1 + 7 * 0.1f) = 3.40000002086..., and 20 points of that ceils
+	 * to 69 credits instead of the 68 the content author priced. A thousandth of a credit is not
+	 * a real cost, so it is charged as zero.
+	 */
+	constexpr double RepairCostEpsilon = 1.e-3;
+
+	/** Credits for Points condition points on an item of this grade. Single source of truth for
+	 *  the price: quoting (GetRepairCost) and charging (Internal_RepairItem) both come here. */
+	int32 RepairCostFor(const FDaConditionConfig& Config, int32 Grade, int32 Points)
+	{
+		if (Points <= 0)
+		{
+			return 0;
+		}
+
+		const double PerPoint = static_cast<double>(Config.RepairCreditsPerPoint)
+			* (1.0 + static_cast<double>(Grade) * static_cast<double>(Config.RepairGradeCostScale));
+
+		return FMath::Max(0, FMath::CeilToInt(static_cast<double>(Points) * PerPoint - RepairCostEpsilon));
+	}
 }
 
 UDaInventoryComponent::UDaInventoryComponent()
@@ -262,6 +288,51 @@ int32 UDaInventoryComponent::GetItemSeed(FGuid ItemID)
 }
 
 // ---------------------------------------------------------------------------
+// Condition repair
+// ---------------------------------------------------------------------------
+
+bool UDaInventoryComponent::RepairItem(FGuid ItemID, int32 Points)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		// Client: route to server RPC (optimistic return; the server prices and validates).
+		Server_RepairItem(ItemID, Points);
+		return true;
+	}
+
+	return Internal_RepairItem(ItemID, Points);
+}
+
+int32 UDaInventoryComponent::GetRepairCost(FGuid ItemID, int32 Points) const
+{
+	const UDaItemDefinition* Def = ResolveConditionDefinition(ItemID);
+	if (!Def)
+	{
+		return 0;
+	}
+
+	const int32 Grade = FMath::Clamp(GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade), 0, 10);
+	// Quote exactly what the till charges. Internal_RepairItem clamps an explicit order down to what
+	// is actually missing, so pricing the full Points here would quote a shop customer for points the
+	// item cannot hold — the quote and the charge have to be the same number.
+	const int32 Billable = FMath::Min(Points, GetMissingCondition(ItemID));
+	return RepairCostFor(Def->ConditionConfig, Grade, Billable);
+}
+
+int32 UDaInventoryComponent::GetMissingCondition(FGuid ItemID) const
+{
+	const UDaItemDefinition* Def = ResolveConditionDefinition(ItemID);
+	if (!Def)
+	{
+		return 0;
+	}
+
+	const int32 Grade = FMath::Clamp(GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade), 0, 10);
+	const int32 Cap = Def->ConditionConfig.GetConditionCap(Grade);
+	return FMath::Max(0, Cap - GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition));
+}
+
+// ---------------------------------------------------------------------------
 // Loadout
 // ---------------------------------------------------------------------------
 
@@ -337,6 +408,81 @@ void UDaInventoryComponent::LoadInventory(const TArray<FDaInventoryEntry>& Saved
 	{
 		InventoryList.AddEntry(Entry);
 	}
+
+	// Inert-lock migration. A save written before an item type opted into condition carries entries
+	// with no Item.Stat.Condition at all — and a stat count of 0 is how "absent" is stored, so those
+	// entries read as Broken and Internal_EquipItem refuses them forever. Fill them once, here, on
+	// the way in. Deliberately NOT in RestoreEntry: a drop snapshot carries its own stats by design,
+	// and re-initialising one would be a free repair.
+	TArray<FGuid> NeedsConditionInit;
+	for (const FDaInventoryEntry& Entry : InventoryList.Entries)
+	{
+		if (Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
+		{
+			continue;
+		}
+		const UDaItemDefinition* Def = ResolveItemDefinition(Entry.ItemDefinitionID);
+		if (Def && Def->ConditionConfig.bUsesCondition)
+		{
+			NeedsConditionInit.Add(Entry.ItemID);
+		}
+	}
+	// Second pass by identity: the stat writes below mark entries dirty and broadcast, and a
+	// listener is free to reshape the array we would otherwise still be walking.
+	for (const FGuid& ItemID : NeedsConditionInit)
+	{
+		const FDaInventoryEntry* Entry = FindEntryByItemID(ItemID);
+		const UDaItemDefinition* Def = Entry ? ResolveItemDefinition(Entry->ItemDefinitionID) : nullptr;
+		if (!Def)
+		{
+			continue;
+		}
+		LOG("LoadInventory: item %s (%s) loaded without Item.Stat.Condition — initialising it to its "
+			"grade cap (pre-condition save)", *ItemID.ToString(), *Def->GetName());
+		InitializeConditionStats(ItemID, *Def);
+	}
+}
+
+bool UDaInventoryComponent::RestoreEntry(const FDaInventoryEntry& SavedEntry)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		LOG_WARNING("RestoreEntry called on non-authority. Ignoring.");
+		return false;
+	}
+
+	if (!SavedEntry.IsValid())
+	{
+		LOG_WARNING("RestoreEntry: entry carries no ItemID — nothing to restore");
+		return false;
+	}
+
+	// One instance, one place: restoring an ItemID this inventory already holds would give the
+	// same item two entries, and every lookup by identity would then be ambiguous.
+	if (FindEntryByItemID(SavedEntry.ItemID))
+	{
+		LOG_WARNING("RestoreEntry: item %s is already in this inventory", *SavedEntry.ItemID.ToString());
+		return false;
+	}
+
+	int32 TargetSlot = SavedEntry.SlotIndex;
+	if (TargetSlot < 0 || TargetSlot >= MaxSlots || InventoryList.FindBySlot(TargetSlot) != nullptr)
+	{
+		TargetSlot = InventoryList.FindFirstEmptySlot(MaxSlots);
+	}
+
+	if (TargetSlot == INDEX_NONE)
+	{
+		LOG_WARNING("RestoreEntry: inventory full (MaxSlots=%d), cannot restore item %s", MaxSlots, *SavedEntry.ItemID.ToString());
+		return false;
+	}
+
+	// Verbatim copy apart from the slot: AddEntry rebuilds the stat accelerator and fires the
+	// added-broadcast, exactly as it does for save-loaded entries.
+	FDaInventoryEntry Restored = SavedEntry;
+	Restored.SlotIndex = TargetSlot;
+	InventoryList.AddEntry(Restored);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +596,13 @@ void UDaInventoryComponent::Server_DropItem_Implementation(int32 SlotIndex, int3
 
 void UDaInventoryComponent::Server_SetItemStat_Implementation(FGuid ItemID, FGameplayTag StatTag, int32 Count)
 {
+	if (!IsClientWritableStat(StatTag))
+	{
+		LOG_WARNING("Server_SetItemStat: %s is not client-writable — rejected for item %s",
+			*StatTag.ToString(), *ItemID.ToString());
+		return;
+	}
+
 	if (!Internal_SetItemStat(ItemID, StatTag, Count))
 	{
 		LOG_WARNING("Server_SetItemStat failed for item %s stat %s", *ItemID.ToString(), *StatTag.ToString());
@@ -458,6 +611,13 @@ void UDaInventoryComponent::Server_SetItemStat_Implementation(FGuid ItemID, FGam
 
 void UDaInventoryComponent::Server_AddItemStat_Implementation(FGuid ItemID, FGameplayTag StatTag, int32 Delta)
 {
+	if (!IsClientWritableStat(StatTag))
+	{
+		LOG_WARNING("Server_AddItemStat: %s is not client-writable — rejected for item %s",
+			*StatTag.ToString(), *ItemID.ToString());
+		return;
+	}
+
 	// Read-modify-write against the server's own value, not a value the client computed.
 	if (!Internal_SetItemStat(ItemID, StatTag, GetItemStat(ItemID, StatTag) + Delta))
 	{
@@ -465,11 +625,38 @@ void UDaInventoryComponent::Server_AddItemStat_Implementation(FGuid ItemID, FGam
 	}
 }
 
+bool UDaInventoryComponent::IsClientWritableStat(FGameplayTag StatTag)
+{
+	// The protected leaves. These are provenance or economy inputs the authority alone decides:
+	// Grade is permanent (it fixes the condition cap AND prices every repair), so a client that
+	// could write it would mint itself a better item and a cheaper repair bill in one move.
+	// Server-side callers — spawners, loot tables, the acquisition path — do not come through here:
+	// they use SetItemStat/AddItemStat directly, which reach Internal_SetItemStat on the authority.
+	// Extend this list as M3 adds leaves with the same shape.
+	const FGameplayTag ProtectedLeaves[] = { CoreGameplayTags::TAG_Item_Stat_Grade };
+	for (const FGameplayTag& Protected : ProtectedLeaves)
+	{
+		if (StatTag.MatchesTagExact(Protected))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 void UDaInventoryComponent::Server_SetLoadoutSlot_Implementation(FGameplayTag SlotTag, FGuid ItemID)
 {
 	if (!Internal_SetLoadoutSlot(SlotTag, ItemID))
 	{
 		LOG_WARNING("Server_SetLoadoutSlot failed for slot %s item %s", *SlotTag.ToString(), *ItemID.ToString());
+	}
+}
+
+void UDaInventoryComponent::Server_RepairItem_Implementation(FGuid ItemID, int32 Points)
+{
+	if (!Internal_RepairItem(ItemID, Points))
+	{
+		LOG_WARNING("Server_RepairItem failed for item %s points %d", *ItemID.ToString(), Points);
 	}
 }
 
@@ -523,6 +710,17 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 	// Check if stackable and try to stack with existing entries
 	if (Def->MaxStackCount > 1)
 	{
+		if (Def->ConditionConfig.bUsesCondition)
+		{
+			// Condition is per-INSTANCE state on one entry, and a stack is one entry standing in for
+			// many items, so there is no honest answer to "what condition is this stack in". The
+			// definition is misconfigured; IsDataValid flags it in the editor, and this is the same
+			// finding at runtime for content that shipped before the check existed.
+			LOG_WARNING("Internal_AddItem: %s sets bUsesCondition AND MaxStackCount=%d — stacked items "
+				"get no condition stats. Set MaxStackCount=1 on condition-using definitions.",
+				*Def->GetName(), Def->MaxStackCount);
+		}
+
 		// Build a temporary entry to test stacking compatibility
 		FDaInventoryEntry StackProbe;
 		StackProbe.ItemDefinitionID = ItemDefinitionID;
@@ -606,6 +804,12 @@ bool UDaInventoryComponent::Internal_AddItem(FPrimaryAssetId ItemDefinitionID, i
 			FString AssetName = FPackageName::ObjectPathToObjectName(AssetPath.GetAssetName());
 			NewEntry.AbilitySetID = FPrimaryAssetId(FPrimaryAssetType(TEXT("AbilitySetData")), FName(*AssetName));
 		}
+
+		// Stamp condition onto the LOCAL entry, before it is published. Filling it afterwards
+		// through the stat path would publish a condition-user at 0 for an instant — one added
+		// broadcast that reads as Broken, then two more changed broadcasts correcting it. Stamped
+		// here, the entry is coherent the first time anyone sees it: one broadcast, one dirty mark.
+		InitializeConditionStats(NewEntry, *Def);
 
 		InventoryList.AddEntry(NewEntry);
 		Remaining -= EntryCount;
@@ -736,7 +940,18 @@ bool UDaInventoryComponent::Internal_DropItem(int32 SlotIndex, int32 Count)
 	// A single pickup actor represents the whole dropped stack
 	if (ADaItemActor* Pickup = GetWorld()->SpawnActorDeferred<ADaItemActor>(PickupClass, SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn))
 	{
-		Pickup->InitializeDroppedItem(DroppedEntry.ItemDefinitionID, Def->DisplayMesh.LoadSynchronous());
+		if (DropCount >= DroppedEntry.StackCount)
+		{
+			// The instance left the inventory whole, so hand the actor its entry: picking it back
+			// up restores this same item, per-instance stats and all.
+			Pickup->InitializeDroppedItem(DroppedEntry, Def->DisplayMesh.LoadSynchronous());
+		}
+		else
+		{
+			// A partial stack leaves the original entry (and its ItemID) behind in the inventory,
+			// so what hits the ground is a new instance and gets a fresh ID on pickup.
+			Pickup->InitializeDroppedItem(DroppedEntry.ItemDefinitionID, Def->DisplayMesh.LoadSynchronous());
+		}
 		Pickup->FinishSpawning(SpawnTransform);
 	}
 
@@ -796,14 +1011,168 @@ bool UDaInventoryComponent::Internal_SetItemStat(const FGuid& ItemID, FGameplayT
 			Entry.SetStatCount(StatTag, Count);
 			InventoryList.MarkItemDirty(Entry);
 
+			// Snapshot, then broadcast — the discipline the other five guards in this file follow.
+			// `Entry` is a reference into InventoryList.Entries, and the listeners this reaches
+			// (equipment penalties, wear visuals) are free to add or remove entries underneath it.
+			const FDaInventoryEntry Changed = Entry;
 			// Mirrors FDaInventoryList::UpdateEntry's authority broadcast discipline.
-			OnEntryChangedInternal(Entry);
+			OnEntryChangedInternal(Changed);
 			return true;
 		}
 	}
 
 	LOG_WARNING("Internal_SetItemStat: item %s not in inventory", *ItemID.ToString());
 	return false;
+}
+
+void UDaInventoryComponent::InitializeConditionStats(FDaInventoryEntry& Entry, const UDaItemDefinition& Def)
+{
+	const FDaConditionConfig& Config = Def.ConditionConfig;
+	if (!Config.bUsesCondition)
+	{
+		return;
+	}
+
+	// Already worn in: this instance came from somewhere that owns its own stats.
+	if (Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
+	{
+		return;
+	}
+
+	// A stat count of 0 is how "absent" is stored (SetStatCount(0) removes the tag), so a
+	// grade of 0 and no grade at all read the same here — both take the definition's default.
+	int32 Grade = Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Grade);
+	if (Grade <= 0)
+	{
+		Grade = FMath::Clamp(Config.DefaultGrade, 0, 10);
+		Entry.SetStatCount(CoreGameplayTags::TAG_Item_Stat_Grade, Grade);
+	}
+
+	// Items enter play at full condition.
+	Entry.SetStatCount(CoreGameplayTags::TAG_Item_Stat_Condition, Config.GetConditionCap(Grade));
+}
+
+void UDaInventoryComponent::InitializeConditionStats(const FGuid& ItemID, const UDaItemDefinition& Def)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	const FDaConditionConfig& Config = Def.ConditionConfig;
+	if (!Config.bUsesCondition || GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition) > 0)
+	{
+		return;
+	}
+
+	int32 Grade = GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade);
+	if (Grade <= 0)
+	{
+		Grade = FMath::Clamp(Config.DefaultGrade, 0, 10);
+		Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade, Grade);
+	}
+
+	// Both writes go through the stat path: the entry is already published, so each one has to mark
+	// it dirty and broadcast changed for the UI and the equipment manager's band watcher.
+	Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition, Config.GetConditionCap(Grade));
+}
+
+bool UDaInventoryComponent::Internal_RepairItem(const FGuid& ItemID, int32 Points)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return false;
+	}
+
+	// Clients reach this through Server_RepairItem, so Points is untrusted: a negative order
+	// would otherwise pay the player credits for wearing the item down.
+	if (Points < 0)
+	{
+		LOG_WARNING("Internal_RepairItem: negative Points %d for item %s", Points, *ItemID.ToString());
+		return false;
+	}
+
+	const UDaItemDefinition* Def = ResolveConditionDefinition(ItemID);
+	if (!Def)
+	{
+		LOG_WARNING("Internal_RepairItem: item %s is not in this inventory, or does not use condition", *ItemID.ToString());
+		return false;
+	}
+
+	const FDaConditionConfig& Config = Def->ConditionConfig;
+	const int32 Grade = FMath::Clamp(GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Grade), 0, 10);
+	const int32 Cap = Config.GetConditionCap(Grade);
+	const int32 Current = GetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition);
+	const int32 Missing = Cap - Current;
+	if (Missing <= 0)
+	{
+		LOG_WARNING("Internal_RepairItem: item %s is already at its grade-%d cap (%d)", *ItemID.ToString(), Grade, Cap);
+		return false;
+	}
+
+	ADaPlayerState* PlayerState = ResolveOwnerPlayerState();
+	if (!PlayerState)
+	{
+		LOG_WARNING("Internal_RepairItem: no ADaPlayerState owns %s — nothing to charge the repair to", *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	const int32 Credits = PlayerState->GetCredits();
+	int32 Buying = 0;
+	if (Points > 0)
+	{
+		// Explicit order: clamp to what is actually missing (never overshoot the cap, never charge
+		// for points the item cannot hold), then take it or leave it.
+		Buying = FMath::Min(Points, Missing);
+		if (RepairCostFor(Config, Grade, Buying) > Credits)
+		{
+			LOG_WARNING("Internal_RepairItem: item %s repair of %d point(s) costs %d credits, player has %d — rejected",
+				*ItemID.ToString(), Buying, RepairCostFor(Config, Grade, Buying), Credits);
+			return false;
+		}
+	}
+	else
+	{
+		// Points == 0: buy as much as the purse allows. The division only seeds the search —
+		// RepairCostFor is the authority on the price, so the two can never disagree by a credit.
+		const double PerPoint = static_cast<double>(Config.RepairCreditsPerPoint)
+			* (1.0 + static_cast<double>(Grade) * static_cast<double>(Config.RepairGradeCostScale));
+		Buying = PerPoint > 0.0
+			? FMath::Clamp(FMath::FloorToInt(static_cast<double>(Credits) / PerPoint), 0, Missing)
+			: Missing;
+		while (Buying < Missing && RepairCostFor(Config, Grade, Buying + 1) <= Credits)
+		{
+			++Buying;
+		}
+		while (Buying > 0 && RepairCostFor(Config, Grade, Buying) > Credits)
+		{
+			--Buying;
+		}
+
+		if (Buying <= 0)
+		{
+			LOG_WARNING("Internal_RepairItem: item %s needs %d credits for a single point, player has %d",
+				*ItemID.ToString(), RepairCostFor(Config, Grade, 1), Credits);
+			return false;
+		}
+	}
+
+	const int32 Cost = RepairCostFor(Config, Grade, Buying);
+	PlayerState->AdjustCredits(-Cost);
+
+	// The stat path marks the entry dirty and broadcasts changed, which is what makes the
+	// equipment manager's threshold watcher drop the penalty band the repair just lifted.
+	if (!Internal_SetItemStat(ItemID, CoreGameplayTags::TAG_Item_Stat_Condition, Current + Buying))
+	{
+		// Nothing above should let this happen; if it does, the player keeps their credits.
+		PlayerState->AdjustCredits(Cost);
+		LOG_WARNING("Internal_RepairItem: item %s stat write failed — refunded %d credits", *ItemID.ToString(), Cost);
+		return false;
+	}
+
+	LOG("Repaired item %s by %d point(s) to %d/%d for %d credits (grade %d)",
+		*ItemID.ToString(), Buying, Current + Buying, Cap, Cost, Grade);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -910,6 +1279,36 @@ UDaItemDefinition* UDaInventoryComponent::ResolveItemDefinition(FPrimaryAssetId 
 		}
 	}
 	return Def;
+}
+
+const UDaItemDefinition* UDaInventoryComponent::ResolveConditionDefinition(const FGuid& ItemID) const
+{
+	const FDaInventoryEntry* Entry = ItemID.IsValid() ? FindEntryByItemID(ItemID) : nullptr;
+	if (!Entry)
+	{
+		return nullptr;
+	}
+
+	const UDaItemDefinition* Def = ResolveItemDefinition(Entry->ItemDefinitionID);
+	return (Def && Def->ConditionConfig.bUsesCondition) ? Def : nullptr;
+}
+
+ADaPlayerState* UDaInventoryComponent::ResolveOwnerPlayerState() const
+{
+	// Player inventories live on the PlayerState (ADaPlayerState::InventoryComp), which is also
+	// where the credits are, so this is the normal case.
+	if (ADaPlayerState* OwnerState = Cast<ADaPlayerState>(GetOwner()))
+	{
+		return OwnerState;
+	}
+
+	// An inventory placed directly on a pawn still charges that pawn's player, when it has one.
+	if (const APawn* Pawn = Cast<APawn>(GetOwner()))
+	{
+		return Cast<ADaPlayerState>(Pawn->GetPlayerState());
+	}
+
+	return nullptr;
 }
 
 AActor* UDaInventoryComponent::ResolveOwnerAvatar() const
