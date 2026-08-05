@@ -100,6 +100,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Equipment", meta=(DefaultToSelf="Actor"))
 	static UDaEquipmentManagerComponent* GetEquipmentFromActor(AActor* Actor);
 
+	/** Condition (absolute) against the config's percentage thresholds of the grade-derived cap.
+	 *  Public and static because it is pure arithmetic over replicated numbers: a client-side
+	 *  reader (the item debug overlay, a shop or repair UI) can band an item it does not wear
+	 *  without the authority's penalty bookkeeping, and shares this function so its answer can
+	 *  never drift from the one the penalties are applied from. */
+	static EDaConditionBand ComputeConditionBand(const FDaConditionConfig& Config, int32 Condition, int32 Grade);
+
 	// Called by FastArray callbacks on clients AND inline on authority.
 	void HandleEquipped(const FDaAppliedEquipmentEntry& Entry);
 	void HandleUnequipped(const FDaAppliedEquipmentEntry& Entry);
@@ -182,9 +189,6 @@ private:
 	 *  slot still holds the same broken item before tearing anything down (a repair may have landed
 	 *  in the intervening tick). */
 	void HandleDeferredBreak(FGameplayTag SlotTag);
-
-	/** Condition (absolute) against the config's percentage thresholds of the grade-derived cap. */
-	static EDaConditionBand ComputeConditionBand(const FDaConditionConfig& Config, int32 Condition, int32 Grade);
 
 	/** PlayerState (preferred) or owner inventory component. */
 	UDaInventoryComponent* ResolveInventory() const;
