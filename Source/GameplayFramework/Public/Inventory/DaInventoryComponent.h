@@ -13,6 +13,15 @@ struct FDaInventoryEntry;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInventoryEntryEvent, const FDaInventoryEntry&, Entry, int32, SlotIndex);
 
 /**
+ * Deliberately parameterless: "the loadout changed, re-read it".
+ * Replication gives us the array AFTER the fact, so OnRep_Loadout cannot say which slot moved
+ * without diffing against a shadow copy — and a delegate whose payload depends on whether it
+ * fired on the server or on a client is worse than no payload at all. Listeners call
+ * GetLoadout / GetLoadoutItemID.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadoutChanged);
+
+/**
  * FDaLoadoutEntry
  * One loadout assignment: which inventory item the player wants in which Equip.Slot.*.
  * An assignment is intent, not state — the pawn's UDaEquipmentManagerComponent turns it
@@ -225,6 +234,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
 	FOnInventoryEntryEvent OnItemDropped;
 
+	/**
+	 * The loadout changed: a slot was assigned, reassigned or cleared. Fires on the authority the
+	 * moment the mutation lands AND on every client from OnRep_Loadout, so a hotbar built on it
+	 * shows the same thing in both places. Only real changes broadcast — clearing an already
+	 * empty slot is accepted but silent.
+	 */
+	UPROPERTY(BlueprintAssignable, Category="Inventory|Loadout")
+	FOnLoadoutChanged OnLoadoutChanged;
+
 	// ----- Internal callbacks (called by FDaInventoryEntry FastArray callbacks) -----
 
 	void OnEntryAddedInternal(const FDaInventoryEntry& Entry);
@@ -251,8 +269,12 @@ protected:
 	FGameplayTagContainer InventoryTags;
 
 	/** Slot assignments, replicated as an array because a TMap cannot replicate. */
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_Loadout)
 	TArray<FDaLoadoutEntry> Loadout;
+
+	/** Client-side half of OnLoadoutChanged. */
+	UFUNCTION()
+	void OnRep_Loadout();
 
 private:
 

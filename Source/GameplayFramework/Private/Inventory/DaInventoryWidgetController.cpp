@@ -3,6 +3,7 @@
 
 #include "Inventory/DaInventoryWidgetController.h"
 
+#include "Equipment/DaEquipmentManagerComponent.h"
 #include "GameplayFramework.h"
 #include "Inventory/DaInventoryComponent.h"
 #include "Inventory/DaInventoryEntry.h"
@@ -73,6 +74,48 @@ bool UDaInventoryWidgetController::DropItem(int32 SlotIndex, int32 Count)
 		return false;
 	}
 	return InventoryComponent->DropItem(SlotIndex, Count);
+}
+
+bool UDaInventoryWidgetController::AssignToHotbarSlot(FGuid ItemID, int32 SlotIndex)
+{
+	if (!InventoryComponent)
+	{
+		LOG_WARNING("UDaInventoryWidgetController::AssignToHotbarSlot: not initialized (call InitializeInventory first)");
+		return false;
+	}
+
+	const FGameplayTag SlotTag = UDaEquipmentManagerComponent::GetItemSlotTag(SlotIndex);
+	if (!SlotTag.IsValid())
+	{
+		LOG_WARNING("UDaInventoryWidgetController::AssignToHotbarSlot: %d is not a hotbar slot (expected 1..4)", SlotIndex);
+		return false;
+	}
+	if (!ItemID.IsValid())
+	{
+		LOG_WARNING("UDaInventoryWidgetController::AssignToHotbarSlot: invalid ItemID (use ClearHotbarSlot to empty a slot)");
+		return false;
+	}
+
+	return InventoryComponent->SetLoadoutSlot(SlotTag, ItemID);
+}
+
+bool UDaInventoryWidgetController::ClearHotbarSlot(int32 SlotIndex)
+{
+	if (!InventoryComponent)
+	{
+		LOG_WARNING("UDaInventoryWidgetController::ClearHotbarSlot: not initialized (call InitializeInventory first)");
+		return false;
+	}
+
+	const FGameplayTag SlotTag = UDaEquipmentManagerComponent::GetItemSlotTag(SlotIndex);
+	if (!SlotTag.IsValid())
+	{
+		LOG_WARNING("UDaInventoryWidgetController::ClearHotbarSlot: %d is not a hotbar slot (expected 1..4)", SlotIndex);
+		return false;
+	}
+
+	// An invalid ItemID is how the loadout API spells "clear".
+	return InventoryComponent->SetLoadoutSlot(SlotTag, FGuid());
 }
 
 void UDaInventoryWidgetController::RebuildItems()

@@ -45,6 +45,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "DaInventoryWidgetController")
 	bool DropItem(int32 SlotIndex, int32 Count = 1);
 
+	/**
+	 * Put ItemID on hotbar slot 1..4 — a loadout write against Equip.Slot.ItemN.
+	 *
+	 * This is an ASSIGNMENT, not an equip: what happens when the player presses that button is
+	 * decided later, by the item's definition (consumables are used, equippables equip-toggle).
+	 * Server-authoritative through UDaInventoryComponent::SetLoadoutSlot, so a client's true is the
+	 * usual optimistic one — watch OnLoadoutChanged for the real answer.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DaInventoryWidgetController")
+	bool AssignToHotbarSlot(FGuid ItemID, int32 SlotIndex);
+
+	/** Clear hotbar slot 1..4. Whatever was equipped from it stays equipped: the assignment and
+	 *  the equipped state are separate by design (see the loadout write-through note in
+	 *  UDaEquipmentManagerComponent). */
+	UFUNCTION(BlueprintCallable, Category = "DaInventoryWidgetController")
+	bool ClearHotbarSlot(int32 SlotIndex);
+
+	/** The inventory this controller is bound to, so a widget can read loadout/condition state and
+	 *  subscribe to OnLoadoutChanged without resolving the component itself. Null until
+	 *  InitializeInventory succeeds. */
+	UFUNCTION(BlueprintPure, Category = "DaInventoryWidgetController")
+	UDaInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }
+
 	// Delegate to notify listeners when the whole inventory changes
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
 	FOnInventoryItemsChanged OnInventoryChanged;

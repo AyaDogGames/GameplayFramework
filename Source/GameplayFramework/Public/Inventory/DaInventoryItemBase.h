@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Inventory/DaConditionBand.h"
 #include "DaInventoryItemBase.generated.h"
 
 class UDaAbilitySet;
@@ -115,6 +116,49 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Inventory|UI")
 	TObjectPtr<USlateBrushAsset> ThumbnailBrush;
 
+	// ----- Per-instance state (FDaInventoryEntry::StatTags, mirrored for UI) -----
+	// A view-model that showed only the definition's static data could not draw a worn sword
+	// differently from a mint one, which is the whole point of the condition system. These are
+	// copies taken at CreateFromEntry time: the FastArray entry stays the source of truth, and a
+	// changed entry produces a fresh view-model (UDaInventoryWidgetController rebuilds on every
+	// OnEntryChanged), so nothing here goes stale in place.
+
+	/** Every Item.Stat.* leaf on the backing entry, as tag -> count. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Stats")
+	TMap<FGameplayTag, int32> StatCounts;
+
+	/** True when the item's definition opts into the condition/wear model. When false, Condition,
+	 *  ConditionCap and ConditionBand are all meaningless and a UI should draw no wear at all. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Condition")
+	bool bUsesCondition = false;
+
+	/** Permanent provenance (Item.Stat.Grade). 0 when the item carries no grade. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Condition")
+	int32 Grade = 0;
+
+	/** Item.Stat.Condition; 0 for a broken item AND for one that has no condition at all — read
+	 *  bUsesCondition before believing it. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Condition")
+	int32 Condition = 0;
+
+	/** Highest Condition this instance can hold, derived from its Grade by the definition's config. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Condition")
+	int32 ConditionCap = 0;
+
+	/** Which band Condition falls into, from the one banding function
+	 *  (UDaEquipmentManagerComponent::ComputeConditionBand). Normal for non-condition items. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Condition")
+	EDaConditionBand ConditionBand = EDaConditionBand::Normal;
+
+	/** True when the definition lists any Equip.Slot.* tag, i.e. a hotbar press equips it rather
+	 *  than using it. Lets a slot widget pick its affordance without re-resolving the definition. */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Equipment")
+	bool bIsEquippable = false;
+
+	/** Slots this item may occupy (the definition's EquipSlotTags). */
+	UPROPERTY(BlueprintReadOnly, Category="Inventory|Equipment")
+	FGameplayTagContainer EquipSlotTags;
+
 	// ----- Delegates -----
 
 	UPROPERTY(BlueprintAssignable, Category="Inventory")
@@ -138,6 +182,34 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	FGameplayTag GetType() const;
+
+	/** One Item.Stat.* count; 0 when this instance does not carry that stat. */
+	UFUNCTION(BlueprintPure, Category="Inventory|Stats")
+	int32 GetStatCount(FGameplayTag StatTag) const;
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	bool UsesCondition() const { return bUsesCondition; }
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	int32 GetGrade() const { return Grade; }
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	int32 GetCondition() const { return Condition; }
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	int32 GetConditionCap() const { return ConditionCap; }
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	EDaConditionBand GetConditionBand() const { return ConditionBand; }
+
+	/** Condition as 0..1 of the cap, for a progress bar. 0 when the item has no condition model,
+	 *  so a bar bound to this reads empty rather than full for items wear does not apply to —
+	 *  gate the bar's visibility on UsesCondition. */
+	UFUNCTION(BlueprintPure, Category="Inventory|Condition")
+	float GetConditionFraction() const;
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Equipment")
+	bool IsEquippable() const { return bIsEquippable; }
 
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	virtual bool CanMergeWith(const UDaInventoryItemBase* OtherItem) const;

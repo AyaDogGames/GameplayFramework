@@ -1213,11 +1213,17 @@ bool UDaInventoryComponent::Internal_SetLoadoutSlot(FGameplayTag SlotTag, const 
 		{
 			if (ItemID.IsValid())
 			{
+				const bool bChanged = Loadout[Index].ItemID != ItemID;
 				Loadout[Index].ItemID = ItemID;
+				if (bChanged)
+				{
+					OnLoadoutChanged.Broadcast();
+				}
 			}
 			else
 			{
 				Loadout.RemoveAt(Index);
+				OnLoadoutChanged.Broadcast();
 			}
 			return true;
 		}
@@ -1235,8 +1241,10 @@ bool UDaInventoryComponent::Internal_SetLoadoutSlot(FGameplayTag SlotTag, const 
 		FDaLoadoutEntry& NewEntry = Loadout.AddDefaulted_GetRef();
 		NewEntry.SlotTag = SlotTag;
 		NewEntry.ItemID = ItemID;
+		OnLoadoutChanged.Broadcast();
 	}
 
+	// Clearing a slot that was already empty is a no-op, not a failure — and broadcasts nothing.
 	return true;
 }
 
@@ -1247,13 +1255,25 @@ void UDaInventoryComponent::ClearLoadoutForItem(const FGuid& ItemID)
 		return;
 	}
 
+	bool bChanged = false;
 	for (int32 Index = Loadout.Num() - 1; Index >= 0; --Index)
 	{
 		if (Loadout[Index].ItemID == ItemID)
 		{
 			Loadout.RemoveAt(Index);
+			bChanged = true;
 		}
 	}
+
+	if (bChanged)
+	{
+		OnLoadoutChanged.Broadcast();
+	}
+}
+
+void UDaInventoryComponent::OnRep_Loadout()
+{
+	OnLoadoutChanged.Broadcast();
 }
 
 // ---------------------------------------------------------------------------

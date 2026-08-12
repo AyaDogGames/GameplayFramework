@@ -5,6 +5,7 @@
 
 #include "CoreGameplayTags.h"
 #include "Engine/AssetManager.h"
+#include "Equipment/DaEquipmentManagerComponent.h"
 #include "Inventory/DaInventoryEntry.h"
 #include "Inventory/DaItemDefinition.h"
 
@@ -58,6 +59,19 @@ void UDaInventoryItemBase::PopulateFromEntry(const FDaInventoryEntry& Entry, UDa
 	StackCount = Entry.StackCount;
 	InventoryItemTags = Entry.Tags;
 
+	// Per-instance state. Copied straight off the entry rather than recomputed, so the numbers a
+	// widget draws are the numbers that replicated.
+	StatCounts.Reset();
+	for (const FDaTagStack& Stat : Entry.StatTags)
+	{
+		if (Stat.Tag.IsValid())
+		{
+			StatCounts.Add(Stat.Tag, Stat.Count);
+		}
+	}
+	Grade = Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Grade);
+	Condition = Entry.GetStatCount(CoreGameplayTags::TAG_Item_Stat_Condition);
+
 	if (Definition)
 	{
 		Name = FName(*Definition->DisplayName.ToString());
@@ -66,7 +80,35 @@ void UDaInventoryItemBase::PopulateFromEntry(const FDaInventoryEntry& Entry, UDa
 		AbilitySetToGrant = nullptr; // resolved on demand from the definition's soft ptr when needed
 		// Merge definition categorisation tags with any per-instance tags.
 		InventoryItemTags.AppendTags(Definition->ItemTags);
+
+		EquipSlotTags = Definition->EquipSlotTags;
+		bIsEquippable = !EquipSlotTags.IsEmpty();
+
+		bUsesCondition = Definition->ConditionConfig.bUsesCondition;
+		if (bUsesCondition)
+		{
+			ConditionCap = Definition->ConditionConfig.GetConditionCap(Grade);
+			// Same function the authority applies penalties from, so the UI and the penalties can
+			// never disagree about what "Worn" means.
+			ConditionBand = UDaEquipmentManagerComponent::ComputeConditionBand(
+				Definition->ConditionConfig, Condition, Grade);
+		}
 	}
+}
+
+int32 UDaInventoryItemBase::GetStatCount(FGameplayTag StatTag) const
+{
+	const int32* Found = StatCounts.Find(StatTag);
+	return Found ? *Found : 0;
+}
+
+float UDaInventoryItemBase::GetConditionFraction() const
+{
+	if (!bUsesCondition || ConditionCap <= 0)
+	{
+		return 0.f;
+	}
+	return FMath::Clamp(static_cast<float>(Condition) / static_cast<float>(ConditionCap), 0.f, 1.f);
 }
 
 void UDaInventoryItemBase::PopulateWithData(const FDaInventoryItemData& Data)
@@ -111,6 +153,14 @@ void UDaInventoryItemBase::ClearData()
 	ItemDefinitionID = FPrimaryAssetId();
 	SlotIndex = INDEX_NONE;
 	StackCount = 1;
+	StatCounts.Reset();
+	bUsesCondition = false;
+	Grade = 0;
+	Condition = 0;
+	ConditionCap = 0;
+	ConditionBand = EDaConditionBand::Normal;
+	bIsEquippable = false;
+	EquipSlotTags = FGameplayTagContainer();
 }
 
 FGameplayTag UDaInventoryItemBase::GetType() const
