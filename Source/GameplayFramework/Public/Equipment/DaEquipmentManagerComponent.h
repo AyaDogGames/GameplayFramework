@@ -7,6 +7,7 @@
 #include "Components/ActorComponent.h"
 #include "GameplayAbilitySpecHandle.h"
 #include "Equipment/DaEquipmentList.h"
+#include "Inventory/DaConditionBand.h"
 #include "DaEquipmentManagerComponent.generated.h"
 
 class UDaAbilitySystemComponent;
@@ -17,16 +18,6 @@ struct FDaConditionConfig;
 struct FDaInventoryEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEquipmentEntryEvent, const FDaAppliedEquipmentEntry&, Entry);
-
-/** Which penalty an equipped item's Condition currently earns it (see FDaConditionConfig). */
-enum class EDaConditionBand : uint8
-{
-	Normal,
-	Worn,
-	Critical,
-	/** Condition 0: the item is inert. It auto-unequips and cannot be re-equipped until repaired. */
-	Broken
-};
 
 /**
  * UDaEquipmentManagerComponent
@@ -106,6 +97,25 @@ public:
 	 *  without the authority's penalty bookkeeping, and shares this function so its answer can
 	 *  never drift from the one the penalties are applied from. */
 	static EDaConditionBand ComputeConditionBand(const FDaConditionConfig& Config, int32 Condition, int32 Grade);
+
+	/** Equip.Slot.Item1..4 for SlotNumber 1..4; an invalid tag for anything else. The one place
+	 *  hotbar slot NUMBERS (what a key label and a UI row talk about) become slot TAGS (what the
+	 *  loadout and the equipment list talk about), so a widget and an ability cannot disagree. */
+	UFUNCTION(BlueprintPure, Category="Equipment")
+	static FGameplayTag GetItemSlotTag(int32 SlotNumber);
+
+	/**
+	 * The hotbar press, factored out of UDaGameplayAbility_QuickSlot so a UI click runs the SAME
+	 * decision: whatever the pawn's inventory loadout assigns to SlotTag is Used when its
+	 * definition is a consumable, and equip-toggled when it is equippable. Returns false when
+	 * nothing is assigned or the item/definition cannot be resolved.
+	 *
+	 * Callable from either side. On the authority (the ability's ServerInitiated path) the work
+	 * happens inline; from a client (a widget click) it goes through the inventory's and equipment
+	 * manager's own Server_* forwarding, with the optimistic-return caveat those APIs document.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Equipment")
+	static bool ActivateItemSlotForPawn(APawn* Pawn, FGameplayTag SlotTag);
 
 	// Called by FastArray callbacks on clients AND inline on authority.
 	void HandleEquipped(const FDaAppliedEquipmentEntry& Entry);

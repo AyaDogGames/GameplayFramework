@@ -273,6 +273,77 @@ EDaConditionBand UDaEquipmentManagerComponent::ComputeConditionBand(const FDaCon
 	return EDaConditionBand::Normal;
 }
 
+FGameplayTag UDaEquipmentManagerComponent::GetItemSlotTag(int32 SlotNumber)
+{
+	switch (SlotNumber)
+	{
+	case 1: return CoreGameplayTags::TAG_Equip_Slot_Item1;
+	case 2: return CoreGameplayTags::TAG_Equip_Slot_Item2;
+	case 3: return CoreGameplayTags::TAG_Equip_Slot_Item3;
+	case 4: return CoreGameplayTags::TAG_Equip_Slot_Item4;
+	default: return FGameplayTag();
+	}
+}
+
+bool UDaEquipmentManagerComponent::ActivateItemSlotForPawn(APawn* Pawn, FGameplayTag SlotTag)
+{
+	if (!Pawn || !SlotTag.IsValid())
+	{
+		return false;
+	}
+
+	// The loadout lives on the PlayerState's inventory; fall back to a pawn-hosted one so a
+	// pawn that owns its own inventory (AI, a vehicle) still works.
+	UDaInventoryComponent* Inventory = Pawn->GetPlayerState()
+		? UDaInventoryComponent::GetInventoryFromActor(Pawn->GetPlayerState())
+		: nullptr;
+	if (!Inventory)
+	{
+		Inventory = UDaInventoryComponent::GetInventoryFromActor(Pawn);
+	}
+	if (!Inventory)
+	{
+		return false;
+	}
+
+	const FGuid ItemID = Inventory->GetLoadoutItemID(SlotTag);
+	const FDaInventoryEntry* Entry = ItemID.IsValid() ? Inventory->FindEntryByItemID(ItemID) : nullptr;
+	if (!Entry)
+	{
+		return false;
+	}
+
+	// Read what we need off the entry before anything can invalidate the pointer.
+	const FPrimaryAssetId DefinitionID = Entry->ItemDefinitionID;
+	const int32 SlotIndex = Entry->SlotIndex;
+
+	UDaItemDefinition* Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetObject(DefinitionID));
+	if (!Def)
+	{
+		Def = Cast<UDaItemDefinition>(UAssetManager::Get().GetPrimaryAssetPath(DefinitionID).TryLoad());
+	}
+	if (!Def)
+	{
+		return false;
+	}
+
+	if (!Def->EquipSlotTags.IsEmpty())
+	{
+		UDaEquipmentManagerComponent* Equipment = GetEquipmentFromActor(Pawn);
+		if (!Equipment)
+		{
+			return false;
+		}
+		if (Equipment->GetEquippedItemID(SlotTag) == ItemID)
+		{
+			return Equipment->UnequipSlot(SlotTag);
+		}
+		return Equipment->EquipItem(ItemID, SlotTag);
+	}
+
+	return Inventory->UseItem(SlotIndex);
+}
+
 void UDaEquipmentManagerComponent::ClearConditionPenalty(FGameplayTag SlotTag)
 {
 	const FActiveGameplayEffectHandle* Tracked = ConditionPenaltyHandles.Find(SlotTag);

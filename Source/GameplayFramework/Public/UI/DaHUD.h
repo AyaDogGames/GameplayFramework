@@ -14,6 +14,7 @@ class UDaAbilitySystemComponent;
 class UDaStatMenuWidgetController;
 class UDaOverlayWidgetController;
 class UDaInventoryWidgetController;
+class UDaHotbarWidget;
 class UDaUserWidgetBase;
 struct FWidgetControllerParams;
 
@@ -48,6 +49,28 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	void RemoveOverlay();
+
+	/**
+	 * Put the hotbar row on screen. Called from InitRootLayout, and a no-op when HotbarWidgetClass
+	 * is unset — which is how projects with no hotbar stay unaffected.
+	 *
+	 * Two placement decisions, both learned from getting them wrong:
+	 *  - It goes straight to the PLAYER SCREEN, not onto the UI.Layer.Game stack that carries the
+	 *    overlay. An activatable-widget stack shows only its top entry, so pushing the hotbar there
+	 *    would hide the overlay (and vice versa). A hotbar is a HUD element, not a screen; nothing
+	 *    about it wants CommonUI's activation lifecycle or input routing.
+	 *  - It goes up with the ROOT LAYOUT, not with the overlay. A network client in GlitchShaper
+	 *    reaches InitRootLayout but never InitOverlay, and hooking the hotbar to the latter left
+	 *    every client without one.
+	 */
+	UFUNCTION(BlueprintCallable)
+	void InitHotbar(APlayerController* PC);
+
+	UFUNCTION(BlueprintCallable)
+	void RemoveHotbar();
+
+	UFUNCTION(BlueprintPure, Category="UI|Hotbar")
+	UDaHotbarWidget* GetHotbarWidget() const { return HotbarWidget; }
 
 	FORCEINLINE FGameplayTagContainer GetOverlayAttributeSetTags() { return OverlayWidgetAttributeSetTags; }
 	FORCEINLINE FGameplayTagContainer GetStatMenuAttributeSetTags() { return StatMenuWidgetAttributeSetTags; }
@@ -89,8 +112,23 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="UI|Overlay")
 	TArray<TObjectPtr<UDaUILevelData>> OverlayWidgetLevelData;
 	
+	// Hotbar
+
+	// Row of Equip.Slot.Item1..4 quick slots, drawn over the overlay. Leave unset for no hotbar.
+	UPROPERTY(EditAnywhere, Category="UI|Hotbar")
+	TSubclassOf<UDaHotbarWidget> HotbarWidgetClass;
+
+	// Z order the hotbar is added to the player screen with. Above the root layout (which goes in
+	// at 0) so the row is not painted over by the overlay.
+	UPROPERTY(EditAnywhere, Category="UI|Hotbar")
+	int32 HotbarZOrder = 1;
+
+	// Runtime hotbar instance pointer
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="UI|Hotbar")
+	TObjectPtr<UDaHotbarWidget> HotbarWidget;
+
 	// Stats
-	
+
 	// Widget Controller for all GAS attributes in a given AttributeSet array
 	UPROPERTY(EditAnywhere, Category="UI|Stats")
 	TSubclassOf<UDaStatMenuWidgetController> StatMenuWidgetControllerClass;

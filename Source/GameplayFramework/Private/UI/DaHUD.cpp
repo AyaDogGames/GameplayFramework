@@ -7,6 +7,7 @@
 #include "GameplayFramework.h"
 #include "Kismet/GameplayStatics.h"
 #include "Inventory/DaInventoryWidgetController.h"
+#include "UI/DaHotbarWidget.h"
 #include "UI/DaOverlayWidgetController.h"
 #include "UI/DaStatMenuWidgetController.h"
 #include "UI/DaUserWidgetBase.h"
@@ -56,6 +57,13 @@ void ADaHUD::InitRootLayout(APlayerController* PC)
 	UUserWidget* Widget = CreateWidget<UUserWidget>(PC, RootLayoutClass);
 	RootLayout = Cast<UDaPrimaryGameLayout>(Widget);
 	Widget->AddToViewport();
+
+	// The hotbar goes up with the root layout, NOT with the overlay. It has no dependency on the
+	// overlay's widget controller, its attribute tags or the per-level UI data — it resolves the
+	// local player's inventory itself — and hooking it to InitOverlay cost a client its hotbar
+	// entirely: in GlitchShaper a network client reaches InitRootLayout but never InitOverlay, so
+	// the row existed on the host and nowhere else.
+	InitHotbar(PC);
 
 	// notify we are loaded and ready to have widgets pushed onto layers
 	NativeRootLayoutLoaded();
@@ -121,8 +129,42 @@ void ADaHUD::InitOverlay(APlayerController* PC, APlayerState* PS, UDaAbilitySyst
 	}
 }
 
+void ADaHUD::InitHotbar(APlayerController* PC)
+{
+	if (!HotbarWidgetClass || !PC)
+	{
+		return;
+	}
+
+	if (HotbarWidget)
+	{
+		// InitOverlay can run again (level change, re-init); one row is enough.
+		return;
+	}
+
+	HotbarWidget = CreateWidget<UDaHotbarWidget>(PC, HotbarWidgetClass);
+	if (!HotbarWidget)
+	{
+		LOG_ERROR("DaHud: failed to create hotbar widget of class %s", *GetNameSafe(HotbarWidgetClass));
+		return;
+	}
+
+	HotbarWidget->AddToPlayerScreen(HotbarZOrder);
+}
+
+void ADaHUD::RemoveHotbar()
+{
+	if (HotbarWidget)
+	{
+		HotbarWidget->RemoveFromParent();
+		HotbarWidget = nullptr;
+	}
+}
+
 void ADaHUD::RemoveOverlay()
 {
+	RemoveHotbar();
+
 	if (OverlayWidget)
 	{
 		RootLayout->FindAndRemoveWidgetFromLayer(OverlayWidget);
