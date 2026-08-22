@@ -22,6 +22,8 @@ public class DaProcGen : ModuleRules
 			new string[]
 			{
 				"GameplayFramework",
+				// ADaProcGenActor replicates its run seed; the push-model replication macros live here.
+				"NetCore",
 			}
 			);
 	}
