@@ -152,6 +152,7 @@ void UDaScatterPlacementComponent::ExtractPoints(const UPCGComponent* InComponen
 		return;
 	}
 
+	const int32 Cap = FMath::Max(1, MaxPoints);
 	const FPCGDataCollection& Output = InComponent->GetGeneratedGraphOutput();
 	for (const FPCGTaggedData& Tagged : Output.TaggedData)
 	{
@@ -163,17 +164,16 @@ void UDaScatterPlacementComponent::ExtractPoints(const UPCGComponent* InComponen
 		}
 
 		const int32 NumPoints = PointData->GetNumPoints();
+		// Accumulated over EVERY point data, even after the cap fills: the raw count's whole job is
+		// to tell a cap apart from a thin graph, and returning early here would under-report it
+		// exactly when the cap is doing the most work (multi-entry output, cap hit before the last
+		// entry).
 		OutRawCount += NumPoints;
 
-		for (int32 Index = 0; Index < NumPoints; ++Index)
+		// Truncation keeps PCG's own point order rather than sorting by anything we invent, so the
+		// same seed hands out the same first N points on every run and on every machine.
+		for (int32 Index = 0; Index < NumPoints && OutPoints.Num() < Cap; ++Index)
 		{
-			// Truncation keeps PCG's own point order rather than sorting by anything we invent, so the
-			// same seed hands out the same first N points on every run and on every machine.
-			if (OutPoints.Num() >= FMath::Max(1, MaxPoints))
-			{
-				return;
-			}
-
 			OutPoints.Add(PointData->GetTransform(Index));
 		}
 	}
