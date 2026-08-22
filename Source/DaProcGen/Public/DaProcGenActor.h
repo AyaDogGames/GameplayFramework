@@ -9,8 +9,21 @@
 #include "DaProcGenActor.generated.h"
 
 class UBoxComponent;
+class UDaProcGenParams;
 class UPCGComponent;
 class UPCGGraphInterface;
+
+/**
+ * Fired on EVERY machine immediately after a local generate finishes — on the server from
+ * ServerGenerate, on clients from OnRep_RunSeed — with the seed that was used and the number of
+ * tiles it produced (0 for a reset to seed 0, or for a layout that exhausted its re-rolls).
+ *
+ * It means "the LAYOUT is ready", not "the meshes are up": PCG dressing is asynchronous and is still
+ * in flight when this fires. Consumers that place things on tiles (W4's scatter layer, spawn
+ * managers, debug UI) want exactly this moment; consumers that need finished geometry must wait on
+ * the PCG component instead.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FDaOnLayoutGenerated, int32, RunSeed, int32, TileCount);
 
 /**
  * Actor that owns one generated dungeon: the seed, the tiles built from it, and the PCG component that
@@ -32,9 +45,16 @@ class DAPROCGEN_API ADaProcGenActor : public AActor
 public:
 	ADaProcGenActor();
 
-	/** Tuning handed to FDaDungeonLayout::Generate. Must match on every machine — it is config, not replicated state. */
+	/**
+	 * Tuning handed to FDaDungeonLayout::Generate. Must match on every machine — it is config, not
+	 * replicated state. Ignored entirely when ParamsAsset is set; read GetEffectiveLayoutParams().
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ProcGen")
 	FDaDungeonLayoutParams LayoutParams;
+
+	/** Shared tuning asset. When set it REPLACES the inline LayoutParams (never merges with them). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ProcGen")
+	TObjectPtr<UDaProcGenParams> ParamsAsset;
 
 	/** Graph run against the emitted tile points. Null generates the layout and dresses nothing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ProcGen")
@@ -47,6 +67,10 @@ public:
 	/** How many derived-seed re-rolls to try before giving up and leaving the layout empty. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ProcGen", meta = (ClampMin = "1"))
 	int32 MaxGenerateAttempts = 8;
+
+	/** Broadcast after every local generate. See FDaOnLayoutGenerated — layout ready, dressing still async. */
+	UPROPERTY(BlueprintAssignable, Category = "ProcGen")
+	FDaOnLayoutGenerated OnLayoutGenerated;
 
 	/** Authority entry point: set the run seed and generate locally. Clients follow via OnRep_RunSeed. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "ProcGen")
@@ -70,6 +94,18 @@ public:
 	/** The seed the layout was actually built from — RunSeed, or a derived re-roll seed if the first roll failed. */
 	UFUNCTION(BlueprintCallable, Category = "ProcGen")
 	int32 GetEffectiveSeed() const { return EffectiveSeed; }
+
+	/** The params this actor actually generates with: ParamsAsset's when one is set, else the inline struct. */
+	UFUNCTION(BlueprintCallable, Category = "ProcGen")
+	FDaDungeonLayoutParams GetEffectiveLayoutParams() const { return ResolveLayoutParams(); }
+
+	/**
+	 * How many times this actor has generated locally since it was created — including resets to seed 0
+	 * and failed generates. Diagnostics: it is how a debug HUD (or a smoke that cannot bind a dynamic
+	 * delegate) sees that a generate actually ran rather than inferring it from the numbers.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "ProcGen")
+	int32 GetLocalGenerationCount() const { return LocalGenerationCount; }
 
 	/**
 	 * Total instance count across every InstancedStaticMeshComponent PCG dressed this actor with
@@ -116,6 +152,9 @@ protected:
 	 */
 	void ApplyLayoutBounds();
 
+	/** ParamsAsset's layout when one is assigned, otherwise the inline struct. No-copy C++ accessor. */
+	const FDaDungeonLayoutParams& ResolveLayoutParams() const;
+
 	/** The volume the dungeon occupies. Gives PCG its bounds; W4's scatter layer gets a shape to sample. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ProcGen")
 	TObjectPtr<UBoxComponent> LayoutBounds;
@@ -129,4 +168,7 @@ private:
 
 	/** Seed the current Tiles were built from (differs from RunSeed only after a re-roll). */
 	int32 EffectiveSeed = 0;
+
+	/** Local generate counter, never replicated — each machine counts its own. */
+	int32 LocalGenerationCount = 0;
 };

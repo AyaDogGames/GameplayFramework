@@ -76,7 +76,9 @@ bool FDaPCGLayoutSourceElement::ExecuteInternal(FPCGContext* Context) const
 
 	// Corner-pivot tile transforms are grid-local; put them where the actor is.
 	const FTransform ActorTransform = ProcGenActor->GetActorTransform();
-	const double HalfCell = 0.5 * static_cast<double>(ProcGenActor->LayoutParams.CellSize);
+	// Effective, not inline: an actor tuned by a UDaProcGenParams asset has a different cell size, and
+	// point bounds that disagree with the lattice make the spawner's culling and density wrong.
+	const double HalfCell = 0.5 * static_cast<double>(ProcGenActor->GetEffectiveLayoutParams().CellSize);
 	const FVector CellExtents = Settings->bSetPointBoundsFromCellSize ? FVector(HalfCell) : FVector(1.0);
 
 	FPCGPointValueRanges OutRanges(PointData, /*bAllocate=*/false);

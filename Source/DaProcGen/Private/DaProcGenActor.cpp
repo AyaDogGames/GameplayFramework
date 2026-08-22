@@ -3,6 +3,7 @@
 #include "DaProcGenActor.h"
 
 #include "DaProcGenModule.h"
+#include "DaProcGenParams.h"
 #include "Components/BoxComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -41,6 +42,13 @@ ADaProcGenActor::ADaProcGenActor()
 	PCGComponent->bIsComponentPartitioned = false;
 }
 
+const FDaDungeonLayoutParams& ADaProcGenActor::ResolveLayoutParams() const
+{
+	// Asset REPLACES the inline struct — never a per-field merge, which would make "which value am I
+	// actually generating with" unanswerable from either place.
+	return ParamsAsset ? ParamsAsset->Layout : LayoutParams;
+}
+
 void ADaProcGenActor::ApplyLayoutBounds()
 {
 	if (!LayoutBounds)
@@ -48,10 +56,12 @@ void ADaProcGenActor::ApplyLayoutBounds()
 		return;
 	}
 
+	const FDaDungeonLayoutParams& Params = ResolveLayoutParams();
+
 	// The lattice runs from the actor origin out to (GridExtent * CellSize) on +X/+Y (corner pivot),
 	// so the box that describes it is offset by half a span, not centred on the actor.
-	const double Span = FMath::Max(1.0, static_cast<double>(LayoutParams.GridExtent) * static_cast<double>(LayoutParams.CellSize));
-	const double Height = FMath::Max(100.0, static_cast<double>(LayoutParams.CellSize));
+	const double Span = FMath::Max(1.0, static_cast<double>(Params.GridExtent) * static_cast<double>(Params.CellSize));
+	const double Height = FMath::Max(100.0, static_cast<double>(Params.CellSize));
 
 	LayoutBounds->SetBoxExtent(FVector(Span * 0.5, Span * 0.5, Height), /*bUpdateOverlaps=*/false);
 	LayoutBounds->SetRelativeLocation(FVector(Span * 0.5, Span * 0.5, 0.0));
@@ -107,13 +117,23 @@ void ADaProcGenActor::GenerateLocal()
 {
 	Tiles.Reset();
 	EffectiveSeed = 0;
+	++LocalGenerationCount;
 
 	if (RunSeed == 0)
 	{
-		UE_LOG(DA_ProcGen, Verbose, TEXT("%s: RunSeed 0, nothing to generate."), *GetName());
+		// A reset is a real state change, not a no-op: leaving the dressing standing would put the
+		// previous dungeon's meshes over an empty layout, with every count reporting zero.
+		if (PCGComponent)
+		{
+			PCGComponent->CleanupLocalImmediate(/*bRemoveComponents=*/true);
+		}
+
+		UE_LOG(DA_ProcGen, Log, TEXT("%s: RunSeed 0 — layout and dressing cleared."), *GetName());
+		OnLayoutGenerated.Broadcast(RunSeed, 0);
 		return;
 	}
 
+	const FDaDungeonLayoutParams& Params = ResolveLayoutParams();
 	const int32 AttemptCap = FMath::Max(1, MaxGenerateAttempts);
 	bool bGenerated = false;
 	for (int32 Attempt = 0; Attempt < AttemptCap; ++Attempt)
@@ -123,7 +143,7 @@ void ADaProcGenActor::GenerateLocal()
 			? RunSeed
 			: static_cast<int32>(HashCombine(static_cast<uint32>(RunSeed), static_cast<uint32>(Attempt)));
 
-		if (FDaDungeonLayout::Generate(AttemptSeed, LayoutParams, Tiles))
+		if (FDaDungeonLayout::Generate(AttemptSeed, Params, Tiles))
 		{
 			EffectiveSeed = AttemptSeed;
 			bGenerated = true;
@@ -147,28 +167,31 @@ void ADaProcGenActor::GenerateLocal()
 	UE_LOG(DA_ProcGen, Log, TEXT("%s: generated %d tiles from seed %d (hash %lld, role %d)."),
 		*GetName(), Tiles.Num(), RunSeed, GetLayoutHash(), static_cast<int32>(GetLocalRole()));
 
-	if (!PCGComponent)
+	if (PCGComponent)
 	{
-		return;
+		// Keep the bounds honest if the params were changed since registration.
+		ApplyLayoutBounds();
+
+		// Same graph, same per-point seeds, same everything: the dressing agrees because the tiles do.
+		PCGComponent->SetGraphLocal(DressingGraph);
+		PCGComponent->Seed = RunSeed;
+
+		if (DressingGraph)
+		{
+			// GenerateLocal (not Generate): Generate is a NetMulticast and every machine already has the
+			// seed. bForce, because the component is otherwise free to consider itself already generated.
+			PCGComponent->CleanupLocalImmediate(/*bRemoveComponents=*/true);
+			PCGComponent->GenerateLocal(/*bForce=*/true);
+		}
+		else
+		{
+			UE_LOG(DA_ProcGen, Warning, TEXT("%s: no DressingGraph set; layout generated but nothing will be dressed."), *GetName());
+		}
 	}
 
-	// Keep the bounds honest if the params were changed since registration.
-	ApplyLayoutBounds();
-
-	// Same graph, same per-point seeds, same everything: the dressing agrees because the tiles do.
-	PCGComponent->SetGraphLocal(DressingGraph);
-	PCGComponent->Seed = RunSeed;
-
-	if (!DressingGraph)
-	{
-		UE_LOG(DA_ProcGen, Warning, TEXT("%s: no DressingGraph set; layout generated but nothing will be dressed."), *GetName());
-		return;
-	}
-
-	// GenerateLocal (not Generate): Generate is a NetMulticast and every machine already has the seed.
-	// bForce, because the component is otherwise free to consider itself already generated.
-	PCGComponent->CleanupLocalImmediate(/*bRemoveComponents=*/true);
-	PCGComponent->GenerateLocal(/*bForce=*/true);
+	// Last, and on every path that got a layout: listeners are told the TILES are ready. The dressing
+	// kicked above is asynchronous and is still in flight right now — see FDaOnLayoutGenerated.
+	OnLayoutGenerated.Broadcast(RunSeed, Tiles.Num());
 }
 
 int64 ADaProcGenActor::GetLayoutHash() const
