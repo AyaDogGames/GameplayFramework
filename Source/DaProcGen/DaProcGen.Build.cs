@@ -22,7 +22,8 @@ public class DaProcGen : ModuleRules
 			new string[]
 			{
 				"GameplayFramework",
-				// ADaProcGenActor replicates its run seed; the push-model replication macros live here.
+				// ADaProcGenActor replicates its run seed with plain DOREPLIFETIME, which in 5.x still
+				// compiles against the push-model registration machinery declared in this module.
 				"NetCore",
 			}
 			);
