@@ -20,21 +20,23 @@ This is the canonical guide for AI agents and contributors working in this repos
   changes in this repo, on this repo's branches; after any plugin change, rebuild all consumer
   projects before committing on their side.
 
-## Modules (both Runtime — there is NO editor module)
+## Modules (all Runtime — there is NO editor module)
 
 From `GameplayFramework.uplugin`:
 
 - **`GameplayFramework`** — `Type: Runtime`, `LoadingPhase: Default`. The main module. Startup (`Private/GameplayFramework.cpp`) just declares the `DA_GameplayFramework` log category and logs a load message — **no asset-type or factory registration**.
 - **`Collectibles`** — `Type: Runtime`, `LoadingPhase: PostDefault`. Depends on the `GameplayFramework` module. Startup logs "Collectibles submodule Loaded." (a verbatim UE-*module* log string — not a git submodule).
+- **`DaProcGen`** — `Type: Runtime`, `LoadingPhase: Default`. Seeded procedural placement (M4). Declares its own `DA_ProcGen` log category. Holds `FDaDungeonLayout` (engine-math-only seeded room/corridor/wall generator — see below) and `UDaProcGenLibrary` (its Blueprint/Python surface). This is the module that brings the **PCG** plugin dependency in for every consumer.
 
 There is **NO `GameplayFrameworkEditor` module** and no editor target of any kind. `GameplayFrameworkEditorToolingPlan.md` is an **aspirational design proposal**; its `UDaProjectSetupWizard` / `EGameType` / factories exist only in that markdown, not in code.
 
 ### Plugin dependencies (`.uplugin`)
-`GameplayAbilities`, `EnhancedInput`, `CommonUI`, `ModelViewViewModel` (all enabled).
+`GameplayAbilities`, `EnhancedInput`, `CommonUI`, `ModelViewViewModel`, `PCG` (all enabled). **`PCG` is a cross-project side effect of `DaProcGen`, accepted by design** (M4 spec): every consumer of this plugin gets the engine-prebuilt PCG plugin force-enabled. Consumer `.uproject`s list it explicitly too, so the enable is visible where a human looks.
 
 ### Build dependencies
 - `GameplayFramework.Build.cs` — Public: `Core`, `CoreUObject`, `Engine`, `InputCore`, `GameplayAbilities`, `EnhancedInput`, `GameplayTasks`, `DeveloperSettings`, `GameplayTags`, `AIModule`, `CommonUI`, `CommonInput`, `ModelViewViewModel`. Private: `Slate`, `SlateCore`, `UMG`, `Niagara`, `NavigationSystem`, `NetCore`.
 - `Collectibles.Build.cs` — Public: `Core`, `GameplayFramework`. Private: `CoreUObject`, `Engine`, `Slate`, `SlateCore`, `GameplayAbilities`, `GameplayTags`, `CommonUI`, `UMG`, `ModelViewViewModel`.
+- `DaProcGen.Build.cs` — Public: `Core`, `CoreUObject`, `Engine`, `PCG`. Private: `GameplayFramework`.
 
 ## Source map (`Source/`)
 
@@ -79,9 +81,24 @@ Declared with `DA_DECLARE_GAMEPLAY_TAG_EXTERN` / `CE_DECLARE_GAMEPLAY_TAG_EXTERN
 2. Run the project's **GenerateProjectFiles** so both modules are detected, then build the `.sln` (Windows) / project from your IDE or the editor.
 3. Engine reference for API checks: `C:/Source/UnrealEngine` (UE 5.8.0 source, branch UE5; includes the Lyra sample at `Samples/Games/Lyra`).
 
-## No automated tests
+## Tests
 
-There is no test module, test target, or CI test runner in this repository. Do not claim or invent one.
+There is still **no test module, no test target, and no CI test runner** in this repository — do not claim or invent one. The one exception is `DaProcGen`, whose pure-math generator is covered by C++ automation tests compiled into the module itself (`Source/DaProcGen/Private/Tests/DaDungeonLayoutTests.cpp`, `DaProcGen.Layout.*`, EditorContext|ClientContext|ServerContext|CommandletContext + SmokeFilter). Run them headless against any consumer project:
+
+```
+"C:/Program Files/Epic Games/UE_5.8/Engine/Binaries/Win64/UnrealEditor-Cmd.exe" <Project>.uproject \
+  -ExecCmds="Automation RunTests DaProcGen" -TestExit="Automation Test Queue Empty" \
+  -unattended -nop4 -nosplash -nullrhi -NoLiveCoding -stdout
+```
+
+Everything else is verified the project way: scripted smokes driven at a live editor from the consuming project's `Tools/smoke/`.
+
+## `DaProcGen` — seeded placement (M4)
+
+- **`FDaDungeonLayout::Generate(Seed, FDaDungeonLayoutParams, OutTiles)`** (`Public/DaDungeonLayout.h`) — bounded rejection-sampled non-overlapping room rects (spacing-inflated overlap test) → each room L-corridors to the nearest already-connected room's centre (X leg at the source row, then Y leg at the target column; placement order drives iteration, Manhattan distance breaks toward the lowest index) → 8-neighbour wall rind → room 0's cells become `Entry`. Rooms keep a one-cell margin so the rind always lands inside the grid. Returns **false** only when the attempt budget runs out below `RoomCountMin`, leaving `OutTiles` empty; callers re-roll from a derived seed (`HashCombine(Seed, Attempt)`), bounded, and must treat an empty layout as valid-but-featureless rather than as a crash.
+- **Determinism is the product.** One `FRandomStream`, integer draws only, the same draws consumed in the same order on every path, and a final sort by grid coords so the tile **array** — not merely its hash — is a pure function of (Seed, Params). That is what lets a session replicate one int and have every machine build the same dungeon. `FDaLayoutTile::TileSeed` is `HashCombine(GetTypeHash(Grid), RunSeed)`, which is where downstream (PCG) variation must get its randomness from; anything time- or order-dependent breaks the agreement.
+- **`FDaDungeonLayout::HashTiles`** — order-independent fingerprint (per-tile integer hash, sorted, folded, seeded with the count). Integer content ONLY: the transform floats are excluded, so `CellSize` moves the geometry without moving the fingerprint and two processes can compare hashes safely. Empty layout hashes to 0.
+- **`UDaProcGenLibrary`** (`Public/DaProcGenLibrary.h`) — `GenerateLayoutTiles` / `GetLayoutHash` / `HashLayoutTiles` / `CountTilesOfType`, all `BlueprintCallable` statics. `int64` returns because a `uint32` does not survive a Blueprint int; that is also the surface the consuming project's Python smokes drive.
 
 ## Pointers
 
