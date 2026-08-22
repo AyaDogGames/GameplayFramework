@@ -184,9 +184,16 @@ void UDaAttributeComponent::HandleOutOfHealth(AActor* DamageInstigator, AActor* 
 	{
 		// Send the "GameplayEvent.Death" gameplay event through the owner's ability system.  This can be used to trigger a death gameplay ability.
 		{
+			// A death with no ability-system instigator is normal, not exceptional: falling out of the
+			// world, KillZ, and any environmental damage arrive with a null (or non-ASC) instigator.
+			// Chaining through the cast unconditionally crashed the whole process on the first such
+			// death — found in M4/W2 when the test map's bots killed each other.
+			const IAbilitySystemInterface* InstigatorASI = Cast<IAbilitySystemInterface>(DamageInstigator);
+			UAbilitySystemComponent* InstigatorASC = InstigatorASI ? InstigatorASI->GetAbilitySystemComponent() : nullptr;
+
 			FGameplayEventData Payload;
 			Payload.EventTag = CoreGameplayTags::TAG_Event_Death;
-			Payload.Instigator = Cast<IAbilitySystemInterface>(DamageInstigator)->GetAbilitySystemComponent()->GetAvatarActor();
+			Payload.Instigator = InstigatorASC ? InstigatorASC->GetAvatarActor() : DamageInstigator;
 			Payload.Target = AbilitySystemComponent->GetAvatarActor();
 			Payload.OptionalObject = DamageEffectSpec->Def;
 			Payload.ContextHandle = DamageEffectSpec->GetEffectContext();
