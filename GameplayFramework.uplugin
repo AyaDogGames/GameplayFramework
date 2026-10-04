@@ -24,11 +24,20 @@
 			"Name": "Collectibles",
 			"Type": "Runtime",
 			"LoadingPhase": "PostDefault"
+		},
+		{
+			"Name": "DaProcGen",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
 		{
 			"Name": "GameplayAbilities",
+			"Enabled": true
+		},
+		{
+			"Name": "PCG",
 			"Enabled": true
 		},
 		{
