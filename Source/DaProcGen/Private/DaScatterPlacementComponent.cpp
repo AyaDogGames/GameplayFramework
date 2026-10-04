@@ -6,6 +6,7 @@
 #include "Components/BoxComponent.h"
 #include "Data/PCGBasePointData.h"
 #include "GameFramework/Actor.h"
+#include "PCGCommon.h"
 #include "PCGComponent.h"
 #include "PCGData.h"
 #include "PCGGraph.h"
@@ -38,7 +39,9 @@ void UDaScatterPlacementComponent::ApplySamplingBounds()
 	{
 		USceneComponent* Root = Owner->GetRootComponent();
 
-		ScatterBounds = NewObject<UBoxComponent>(Owner, TEXT("DaScatterBounds"));
+		// NAME_None, not a fixed name: a second scatter component on the same host would otherwise
+		// find the first one's object by name and reconstruct it in place.
+		ScatterBounds = NewObject<UBoxComponent>(Owner, NAME_None);
 		ScatterBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		ScatterBounds->SetGenerateOverlapEvents(false);
 		ScatterBounds->SetHiddenInGame(true);
@@ -88,7 +91,9 @@ UPCGComponent* UDaScatterPlacementComponent::ResolveScatterComponent()
 
 	// A NEW component, never one already on the actor: ADaProcGenActor's PCG component is dressing the
 	// dungeon, and pointing the scatter graph at it would tear the dungeon down and replace it.
-	ScatterPCGComponent = NewObject<UPCGComponent>(Owner, TEXT("DaScatterPCGComponent"));
+	// NAME_None for the same reason as ScatterBounds: two scatter components on one host must not
+	// share (and silently re-initialise) one PCG component.
+	ScatterPCGComponent = NewObject<UPCGComponent>(Owner, NAME_None);
 	ScatterPCGComponent->GenerationTrigger = EPCGComponentGenerationTrigger::GenerateOnDemand;
 	ScatterPCGComponent->bActivated = true;
 	ScatterPCGComponent->bIsComponentPartitioned = false;
@@ -100,6 +105,9 @@ UPCGComponent* UDaScatterPlacementComponent::ResolveScatterComponent()
 	// runtime-legal, and fired only after GeneratedGraphOutput has been filled in.
 	GeneratedDelegateHandle = ScatterPCGComponent->OnPCGGraphGeneratedDelegate.AddUObject(
 		this, &UDaScatterPlacementComponent::HandleScatterGenerated);
+	// Generated fires only on success; a cancelled run would otherwise leave bScatterPending stuck.
+	CancelledDelegateHandle = ScatterPCGComponent->OnPCGGraphCancelledDelegate.AddUObject(
+		this, &UDaScatterPlacementComponent::HandleScatterCancelled);
 
 	return ScatterPCGComponent;
 }
@@ -136,7 +144,17 @@ void UDaScatterPlacementComponent::GenerateScatter(int32 InSeed)
 
 	bScatterPending = true;
 	PCG->CleanupLocalImmediate(/*bRemoveComponents=*/true);
-	PCG->GenerateLocal(/*bForce=*/true);
+	// The task id is the only readback for "did PCG schedule anything": the void GenerateLocal hides a
+	// refusal (unregistered component, degenerate bounds), and the generated delegate never fires for
+	// a run that never started — so without this check IsScatterPending() would stay true forever.
+	const FPCGTaskId TaskId = PCG->GenerateLocalGetTaskId(/*bForce=*/true);
+	if (TaskId == InvalidPCGTaskId)
+	{
+		bScatterPending = false;
+		UE_LOG(DA_ProcGen, Warning, TEXT("%s: PCG refused to schedule the scatter for seed %d (component unregistered, or the owner's bounds are degenerate); nothing is pending."),
+			*GetName(), InSeed);
+		return;
+	}
 
 	UE_LOG(DA_ProcGen, Log, TEXT("%s: scatter kicked with seed %d (graph %s)."),
 		*GetName(), InSeed, *GetNameSafe(ScatterGraph));
@@ -197,6 +215,18 @@ void UDaScatterPlacementComponent::HandleScatterGenerated(UPCGComponent* InCompo
 	OnPointsReady.Broadcast(LastPoints);
 }
 
+void UDaScatterPlacementComponent::HandleScatterCancelled(UPCGComponent* InComponent)
+{
+	if (!InComponent || InComponent != ScatterPCGComponent)
+	{
+		return;
+	}
+
+	bScatterPending = false;
+	UE_LOG(DA_ProcGen, Warning, TEXT("%s: scatter seed %d was cancelled by PCG before it produced points."),
+		*GetName(), ScatterSeed);
+}
+
 TArray<FTransform> UDaScatterPlacementComponent::GetLastPoints() const
 {
 	return LastPoints;
@@ -204,10 +234,18 @@ TArray<FTransform> UDaScatterPlacementComponent::GetLastPoints() const
 
 void UDaScatterPlacementComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (ScatterPCGComponent && GeneratedDelegateHandle.IsValid())
+	if (ScatterPCGComponent)
 	{
-		ScatterPCGComponent->OnPCGGraphGeneratedDelegate.Remove(GeneratedDelegateHandle);
-		GeneratedDelegateHandle.Reset();
+		if (GeneratedDelegateHandle.IsValid())
+		{
+			ScatterPCGComponent->OnPCGGraphGeneratedDelegate.Remove(GeneratedDelegateHandle);
+			GeneratedDelegateHandle.Reset();
+		}
+		if (CancelledDelegateHandle.IsValid())
+		{
+			ScatterPCGComponent->OnPCGGraphCancelledDelegate.Remove(CancelledDelegateHandle);
+			CancelledDelegateHandle.Reset();
+		}
 	}
 
 	Super::EndPlay(EndPlayReason);

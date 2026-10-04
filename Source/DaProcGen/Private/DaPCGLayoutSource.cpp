@@ -78,8 +78,12 @@ bool FDaPCGLayoutSourceElement::ExecuteInternal(FPCGContext* Context) const
 	const FTransform ActorTransform = ProcGenActor->GetActorTransform();
 	// Effective, not inline: an actor tuned by a UDaProcGenParams asset has a different cell size, and
 	// point bounds that disagree with the lattice make the spawner's culling and density wrong.
-	const double HalfCell = 0.5 * static_cast<double>(ProcGenActor->GetEffectiveLayoutParams().CellSize);
-	const FVector CellExtents = Settings->bSetPointBoundsFromCellSize ? FVector(HalfCell) : FVector(1.0);
+	// Corner pivot (FDaLayoutTile::Transform is the cell's MIN corner), so the bounds run from the
+	// point out to +CellSize — not ±half a cell around it, which would shift every bounds-reading node
+	// (SelfPruning, Difference, BoundsModifier, debug display) half a cell off the tiles.
+	const double Cell = static_cast<double>(ProcGenActor->GetEffectiveLayoutParams().CellSize);
+	const FVector BoundsMin = Settings->bSetPointBoundsFromCellSize ? FVector::ZeroVector : FVector(-1.0);
+	const FVector BoundsMax = Settings->bSetPointBoundsFromCellSize ? FVector(Cell) : FVector(1.0);
 
 	FPCGPointValueRanges OutRanges(PointData, /*bAllocate=*/false);
 
@@ -90,8 +94,8 @@ bool FDaPCGLayoutSourceElement::ExecuteInternal(FPCGContext* Context) const
 		OutRanges.TransformRange[Index] = Tile.Transform * ActorTransform;
 		OutRanges.DensityRange[Index] = 1.0f;
 		OutRanges.SteepnessRange[Index] = 1.0f;
-		OutRanges.BoundsMinRange[Index] = -CellExtents;
-		OutRanges.BoundsMaxRange[Index] = CellExtents;
+		OutRanges.BoundsMinRange[Index] = BoundsMin;
+		OutRanges.BoundsMaxRange[Index] = BoundsMax;
 		OutRanges.ColorRange[Index] = FVector4::One();
 		// The ONLY source of downstream variation: derived from (Grid, RunSeed), never from index or time.
 		OutRanges.SeedRange[Index] = Tile.TileSeed;

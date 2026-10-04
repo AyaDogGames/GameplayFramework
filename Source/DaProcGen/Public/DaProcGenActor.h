@@ -66,7 +66,7 @@ public:
 
 	/** How many derived-seed re-rolls to try before giving up and leaving the layout empty. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ProcGen", meta = (ClampMin = "1"))
-	int32 MaxGenerateAttempts = 8;
+	int32 MaxGenerateAttempts = FDaDungeonLayout::DefaultMaxGenerateAttempts;
 
 	/** Broadcast after every local generate. See FDaOnLayoutGenerated — layout ready, dressing still async. */
 	UPROPERTY(BlueprintAssignable, Category = "ProcGen")
@@ -122,10 +122,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "ProcGen")
 	UPCGComponent* GetPCGComponent() const { return PCGComponent; }
 
+	/**
+	 * True while the dressing graph is still executing. PCG adds ISM instances incrementally, so a
+	 * non-zero GetDressedInstanceCount does NOT mean the meshes are all up — anything that traces onto
+	 * the dungeon (a scatter) should wait for this to go false. Here so consumers need no PCG headers.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "ProcGen")
+	bool IsDressingGenerating() const;
+
 	//~Begin AActor interface
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void PostInitializeComponents() override;
+	virtual void BeginPlay() override;
 	//~End AActor interface
 
 protected:
@@ -136,11 +145,26 @@ protected:
 	/**
 	 * Build tiles from RunSeed and kick the dressing graph. Runs identically on server and clients.
 	 *
-	 * Bounded re-roll per the spec: Generate() failing (params unsatisfiable for this seed) is retried
-	 * with Seed' = HashCombine(Seed, Attempt) up to MaxGenerateAttempts, then logs a warning and leaves
-	 * an empty layout — which consumers must treat as valid-but-featureless, never as a crash.
+	 * Bounded re-roll per the spec (FDaDungeonLayout::GenerateWithReroll): Generate() failing (params
+	 * unsatisfiable for this seed) is retried with Seed' = HashCombine(Seed, Attempt) up to
+	 * MaxGenerateAttempts, then logs a warning and leaves an empty layout — which consumers must treat
+	 * as valid-but-featureless, never as a crash.
+	 *
+	 * The dressing half runs only once the actor has begun play; before that it is deferred to
+	 * BeginPlay (see KickDressing).
 	 */
 	void GenerateLocal();
+
+	/**
+	 * Point the PCG component at DressingGraph with RunSeed and run it locally.
+	 *
+	 * Separate from GenerateLocal because of a replication ordering fact: on a RUNTIME-spawned actor a
+	 * client applies the initial bunch — and fires OnRep_RunSeed — BEFORE BeginPlay, and UPCGComponent
+	 * registers with the PCG subsystem only in ITS BeginPlay at runtime (OnRegister's registration is
+	 * editor-only). A generate kicked at that moment schedules nothing, and RunSeed never changes again
+	 * to retry it. So the tiles are built whenever the seed lands, and the dressing waits for BeginPlay.
+	 */
+	void KickDressing();
 
 	/**
 	 * Size LayoutBounds to the volume the layout will occupy.

@@ -2,17 +2,19 @@
 
 #include "DaProcGenLibrary.h"
 
-TArray<FDaLayoutTile> UDaProcGenLibrary::GenerateLayoutTiles(int32 Seed, const FDaDungeonLayoutParams& Params)
+TArray<FDaLayoutTile> UDaProcGenLibrary::GenerateLayoutTiles(int32 Seed, const FDaDungeonLayoutParams& Params, int32 MaxAttempts)
 {
 	TArray<FDaLayoutTile> Tiles;
-	FDaDungeonLayout::Generate(Seed, Params, Tiles);
+	int32 EffectiveSeed = 0;
+	FDaDungeonLayout::GenerateWithReroll(Seed, Params, MaxAttempts, Tiles, EffectiveSeed);
 	return Tiles;
 }
 
-int64 UDaProcGenLibrary::GetLayoutHash(int32 Seed, const FDaDungeonLayoutParams& Params)
+int64 UDaProcGenLibrary::GetLayoutHash(int32 Seed, const FDaDungeonLayoutParams& Params, int32 MaxAttempts)
 {
 	TArray<FDaLayoutTile> Tiles;
-	if (!FDaDungeonLayout::Generate(Seed, Params, Tiles))
+	int32 EffectiveSeed = 0;
+	if (FDaDungeonLayout::GenerateWithReroll(Seed, Params, MaxAttempts, Tiles, EffectiveSeed) == INDEX_NONE)
 	{
 		return 0;
 	}

@@ -8,6 +8,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Net/UnrealNetwork.h"
+#include "PCGCommon.h"
 #include "PCGComponent.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(DaProcGenActor)
@@ -88,6 +89,18 @@ void ADaProcGenActor::PostInitializeComponents()
 	}
 }
 
+void ADaProcGenActor::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// The deferred half of GenerateLocal: a seed that replicated in before BeginPlay built its tiles
+	// but could not dress them, because the PCG component was not registered yet. It is now.
+	if (RunSeed != 0 && !Tiles.IsEmpty())
+	{
+		KickDressing();
+	}
+}
+
 void ADaProcGenActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -133,65 +146,76 @@ void ADaProcGenActor::GenerateLocal()
 		return;
 	}
 
+	// One re-roll policy, shared with UDaProcGenLibrary and the tests, so a hash predicted off the
+	// library is the hash this actor produces for any seed.
 	const FDaDungeonLayoutParams& Params = ResolveLayoutParams();
-	const int32 AttemptCap = FMath::Max(1, MaxGenerateAttempts);
-	bool bGenerated = false;
-	for (int32 Attempt = 0; Attempt < AttemptCap; ++Attempt)
-	{
-		// Attempt 0 uses the run seed verbatim so a healthy seed hashes to exactly what a caller predicts.
-		const int32 AttemptSeed = (Attempt == 0)
-			? RunSeed
-			: static_cast<int32>(HashCombine(static_cast<uint32>(RunSeed), static_cast<uint32>(Attempt)));
-
-		if (FDaDungeonLayout::Generate(AttemptSeed, Params, Tiles))
-		{
-			EffectiveSeed = AttemptSeed;
-			bGenerated = true;
-			if (Attempt > 0)
-			{
-				UE_LOG(DA_ProcGen, Log, TEXT("%s: layout seed %d needed %d re-roll(s); built from derived seed %d."),
-					*GetName(), RunSeed, Attempt, AttemptSeed);
-			}
-			break;
-		}
-	}
-
-	if (!bGenerated)
+	const int32 Attempt = FDaDungeonLayout::GenerateWithReroll(RunSeed, Params, MaxGenerateAttempts, Tiles, EffectiveSeed);
+	if (Attempt == INDEX_NONE)
 	{
 		// Empty layout is a valid, featureless result. Consumers must not treat it as fatal.
-		Tiles.Reset();
 		UE_LOG(DA_ProcGen, Warning, TEXT("%s: layout generation failed for seed %d after %d attempts; layout is empty."),
-			*GetName(), RunSeed, AttemptCap);
+			*GetName(), RunSeed, FMath::Max(1, MaxGenerateAttempts));
+	}
+	else if (Attempt > 0)
+	{
+		UE_LOG(DA_ProcGen, Log, TEXT("%s: layout seed %d needed %d re-roll(s); built from derived seed %d."),
+			*GetName(), RunSeed, Attempt, EffectiveSeed);
 	}
 
 	UE_LOG(DA_ProcGen, Log, TEXT("%s: generated %d tiles from seed %d (hash %lld, role %d)."),
 		*GetName(), Tiles.Num(), RunSeed, GetLayoutHash(), static_cast<int32>(GetLocalRole()));
 
-	if (PCGComponent)
+	if (HasActorBegunPlay())
 	{
-		// Keep the bounds honest if the params were changed since registration.
-		ApplyLayoutBounds();
-
-		// Same graph, same per-point seeds, same everything: the dressing agrees because the tiles do.
-		PCGComponent->SetGraphLocal(DressingGraph);
-		PCGComponent->Seed = RunSeed;
-
-		if (DressingGraph)
-		{
-			// GenerateLocal (not Generate): Generate is a NetMulticast and every machine already has the
-			// seed. bForce, because the component is otherwise free to consider itself already generated.
-			PCGComponent->CleanupLocalImmediate(/*bRemoveComponents=*/true);
-			PCGComponent->GenerateLocal(/*bForce=*/true);
-		}
-		else
-		{
-			UE_LOG(DA_ProcGen, Warning, TEXT("%s: no DressingGraph set; layout generated but nothing will be dressed."), *GetName());
-		}
+		KickDressing();
+	}
+	else
+	{
+		// Initial-bunch OnRep on a runtime-spawned actor: the PCG component is not registered yet and
+		// would schedule nothing. BeginPlay picks the dressing up — see KickDressing.
+		UE_LOG(DA_ProcGen, Log, TEXT("%s: layout built before BeginPlay; dressing deferred until the PCG component registers."), *GetName());
 	}
 
 	// Last, and on every path that got a layout: listeners are told the TILES are ready. The dressing
 	// kicked above is asynchronous and is still in flight right now — see FDaOnLayoutGenerated.
 	OnLayoutGenerated.Broadcast(RunSeed, Tiles.Num());
+}
+
+void ADaProcGenActor::KickDressing()
+{
+	if (!PCGComponent)
+	{
+		return;
+	}
+
+	// Keep the bounds honest if the params were changed since registration.
+	ApplyLayoutBounds();
+
+	// Same graph, same per-point seeds, same everything: the dressing agrees because the tiles do.
+	PCGComponent->SetGraphLocal(DressingGraph);
+	PCGComponent->Seed = RunSeed;
+
+	if (!DressingGraph)
+	{
+		UE_LOG(DA_ProcGen, Warning, TEXT("%s: no DressingGraph set; layout generated but nothing will be dressed."), *GetName());
+		return;
+	}
+
+	// GenerateLocal (not Generate): Generate is a NetMulticast and every machine already has the seed.
+	// bForce, because the component is otherwise free to consider itself already generated. The task
+	// id is the only readback PCG gives for "did it schedule at all" — the void overload hides it.
+	PCGComponent->CleanupLocalImmediate(/*bRemoveComponents=*/true);
+	const FPCGTaskId TaskId = PCGComponent->GenerateLocalGetTaskId(/*bForce=*/true);
+	if (TaskId == InvalidPCGTaskId)
+	{
+		UE_LOG(DA_ProcGen, Warning, TEXT("%s: PCG refused to schedule the dressing for seed %d (component unregistered, or degenerate bounds); %d tiles stand undressed."),
+			*GetName(), RunSeed, Tiles.Num());
+	}
+}
+
+bool ADaProcGenActor::IsDressingGenerating() const
+{
+	return PCGComponent && PCGComponent->IsGenerating();
 }
 
 int64 ADaProcGenActor::GetLayoutHash() const

@@ -309,22 +309,13 @@ bool FDaProcGenLayoutFailurePathTest::RunTest(const FString& Parameters)
 	TArray<FDaLayoutTile> Again;
 	TestFalse(TEXT("unsatisfiable params fail again"), FDaDungeonLayout::Generate(99, Impossible, Again));
 
-	// The bounded re-roll a caller is told to do (Seed' = HashCombine(Seed, Attempt), cap 8) must
-	// terminate: with sane params it lands, with impossible params it gives up with an empty layout.
+	// The bounded re-roll (Seed' = HashCombine(Seed, Attempt), cap 8) is FDaDungeonLayout's own —
+	// the code ADaProcGenActor and UDaProcGenLibrary run, not a copy of the policy. It must terminate:
+	// with sane params it lands, with impossible params it gives up with an empty layout.
 	auto BoundedReRoll = [](int32 Seed, const FDaDungeonLayoutParams& Params, TArray<FDaLayoutTile>& Out) -> int32
 	{
-		for (int32 Attempt = 0; Attempt < 8; ++Attempt)
-		{
-			const int32 DerivedSeed = (Attempt == 0)
-				? Seed
-				: static_cast<int32>(HashCombine(static_cast<uint32>(Seed), static_cast<uint32>(Attempt)));
-			if (FDaDungeonLayout::Generate(DerivedSeed, Params, Out))
-			{
-				return Attempt;
-			}
-		}
-		Out.Reset();
-		return INDEX_NONE;
+		int32 EffectiveSeed = 0;
+		return FDaDungeonLayout::GenerateWithReroll(Seed, Params, FDaDungeonLayout::DefaultMaxGenerateAttempts, Out, EffectiveSeed);
 	};
 
 	TArray<FDaLayoutTile> Recovered;

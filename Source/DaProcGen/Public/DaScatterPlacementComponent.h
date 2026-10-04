@@ -138,6 +138,9 @@ protected:
 	/** Bound to the PCG component's native OnPCGGraphGeneratedDelegate; reads the output and broadcasts. */
 	void HandleScatterGenerated(UPCGComponent* InComponent);
 
+	/** Bound to OnPCGGraphCancelledDelegate: a cancelled run is not pending any more, and nobody else would say so. */
+	void HandleScatterCancelled(UPCGComponent* InComponent);
+
 	/** Walk the generated data collection and collect every point transform, in PCG's own order. */
 	void ExtractPoints(const UPCGComponent* InComponent, TArray<FTransform>& OutPoints, int32& OutRawCount) const;
 
@@ -157,6 +160,7 @@ private:
 	int32 PointsReadyCount = 0;
 	bool bScatterPending = false;
 
-	/** Handle for the native generated-delegate binding, so EndPlay can take it back off. */
+	/** Handles for the native delegate bindings, so EndPlay can take them back off. */
 	FDelegateHandle GeneratedDelegateHandle;
+	FDelegateHandle CancelledDelegateHandle;
 };

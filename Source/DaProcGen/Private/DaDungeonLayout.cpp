@@ -113,10 +113,9 @@ bool FDaDungeonLayout::Generate(int32 Seed, const FDaDungeonLayoutParams& Params
 		// Interior placement window: [1, Extent - 1 - Side] keeps the rind inside the grid.
 		const int32 MaxX = Resolved.Extent - 1 - Width;
 		const int32 MaxY = Resolved.Extent - 1 - Height;
-		if (MaxX < 1 || MaxY < 1)
-		{
-			continue;
-		}
+		// Resolve() clamps the room side to Extent - 2, so the window is never empty and no attempt is
+		// ever skipped — which matters for determinism reasoning: every attempt consumes the same draws.
+		check(MaxX >= 1 && MaxY >= 1);
 
 		FRoomRect Candidate;
 		Candidate.MinX = Stream.RandRange(1, MaxX);
@@ -292,4 +291,26 @@ uint32 FDaDungeonLayout::HashTiles(const TArray<FDaLayoutTile>& Tiles)
 		Result = HashCombine(Result, TileHash);
 	}
 	return Result;
+}
+
+int32 FDaDungeonLayout::GenerateWithReroll(int32 Seed, const FDaDungeonLayoutParams& Params, int32 MaxAttempts,
+	TArray<FDaLayoutTile>& OutTiles, int32& OutEffectiveSeed)
+{
+	const int32 AttemptCap = FMath::Max(1, MaxAttempts);
+	for (int32 Attempt = 0; Attempt < AttemptCap; ++Attempt)
+	{
+		const int32 AttemptSeed = (Attempt == 0)
+			? Seed
+			: static_cast<int32>(HashCombine(static_cast<uint32>(Seed), static_cast<uint32>(Attempt)));
+
+		if (Generate(AttemptSeed, Params, OutTiles))
+		{
+			OutEffectiveSeed = AttemptSeed;
+			return Attempt;
+		}
+	}
+
+	OutTiles.Reset();
+	OutEffectiveSeed = 0;
+	return INDEX_NONE;
 }

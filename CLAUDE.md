@@ -36,7 +36,7 @@ There is **NO `GameplayFrameworkEditor` module** and no editor target of any kin
 ### Build dependencies
 - `GameplayFramework.Build.cs` — Public: `Core`, `CoreUObject`, `Engine`, `InputCore`, `GameplayAbilities`, `EnhancedInput`, `GameplayTasks`, `DeveloperSettings`, `GameplayTags`, `AIModule`, `CommonUI`, `CommonInput`, `ModelViewViewModel`. Private: `Slate`, `SlateCore`, `UMG`, `Niagara`, `NavigationSystem`, `NetCore`.
 - `Collectibles.Build.cs` — Public: `Core`, `GameplayFramework`. Private: `CoreUObject`, `Engine`, `Slate`, `SlateCore`, `GameplayAbilities`, `GameplayTags`, `CommonUI`, `UMG`, `ModelViewViewModel`.
-- `DaProcGen.Build.cs` — Public: `Core`, `CoreUObject`, `Engine`, `PCG`. Private: `GameplayFramework`.
+- `DaProcGen.Build.cs` — Public: `Core`, `CoreUObject`, `Engine`, `PCG`. Private: `NetCore` only (plain `DOREPLIFETIME` compiles against the push-model registration machinery declared there). It deliberately does **not** depend on `GameplayFramework`: nothing in the module includes a framework header.
 
 ## Source map (`Source/`)
 

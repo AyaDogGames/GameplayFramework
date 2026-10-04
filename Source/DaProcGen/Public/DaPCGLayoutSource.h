@@ -42,7 +42,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Settings, meta = (PCG_Overridable))
 	FName TileTypeAttributeName = FName(TEXT("TileType"));
 
-	/** Size each point's bounds to one grid cell (from the actor's LayoutParams.CellSize). Off leaves PCG's unit bounds. */
+	/** Size each point's bounds to one grid cell, from the point (the cell's corner) out to +CellSize, using the actor's EFFECTIVE params. Off leaves PCG's unit bounds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Settings)
 	bool bSetPointBoundsFromCellSize = true;
 

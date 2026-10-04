@@ -108,6 +108,24 @@ struct DAPROCGEN_API FDaDungeonLayout
 	 */
 	static bool Generate(int32 Seed, const FDaDungeonLayoutParams& Params, TArray<FDaLayoutTile>& OutTiles);
 
+	/** The re-roll cap ADaProcGenActor and UDaProcGenLibrary both default to. */
+	static constexpr int32 DefaultMaxGenerateAttempts = 8;
+
+	/**
+	 * Generate with the bounded derived-seed re-roll: attempt 0 uses Seed verbatim (so a healthy seed
+	 * hashes to exactly what a caller predicts), attempt N uses HashCombine(Seed, N), up to MaxAttempts.
+	 *
+	 * This is the ONE implementation of that policy. ADaProcGenActor, UDaProcGenLibrary and the tests
+	 * all call it, so a hash predicted off the library is the hash the actor actually produces for any
+	 * seed — including one whose first roll fails.
+	 *
+	 * @param OutEffectiveSeed  the seed OutTiles were built from (Seed, or the derived re-roll seed).
+	 * @return the attempt index that succeeded, or INDEX_NONE when every attempt failed (OutTiles is
+	 *         left empty and OutEffectiveSeed is 0).
+	 */
+	static int32 GenerateWithReroll(int32 Seed, const FDaDungeonLayoutParams& Params, int32 MaxAttempts,
+		TArray<FDaLayoutTile>& OutTiles, int32& OutEffectiveSeed);
+
 	/**
 	 * Order-independent fingerprint of a tile set (per-tile integer hashes, sorted, folded).
 	 * Integer inputs only — no transform floats — so it agrees bit-exactly across machines.

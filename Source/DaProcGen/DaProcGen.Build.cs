@@ -21,7 +21,8 @@ public class DaProcGen : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"GameplayFramework",
+				// No GameplayFramework dependency, on purpose: DaProcGen is engine math + PCG, and nothing
+				// in it includes a framework header. Add it back only when a file actually needs one.
 				// ADaProcGenActor replicates its run seed with plain DOREPLIFETIME, which in 5.x still
 				// compiles against the push-model registration machinery declared in this module.
 				"NetCore",
